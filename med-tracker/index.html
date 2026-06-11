@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#e98aa3">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="My Meds">
+<title>My Daily Medication Tracker</title>
+<style>
+  :root{
+    --bg1:#fff5f3;
+    --bg2:#f3f0fb;
+    --card:#ffffff;
+    --ink:#3a3340;
+    --ink-soft:#7c7589;
+    --line:#efe7ee;
+    --rose:#e98aa3;
+    --rose-deep:#d96b89;
+    --teal:#4fb4a8;
+    --teal-soft:#e4f5f2;
+    --green:#46b87a;
+    --green-soft:#e7f7ee;
+    --amber:#f3a94c;
+    --amber-soft:#fff3e1;
+    --shadow:0 6px 22px rgba(120,90,120,.12);
+    --shadow-sm:0 2px 8px rgba(120,90,120,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    background:linear-gradient(160deg,var(--bg1),var(--bg2));
+    background-attachment:fixed;
+    min-height:100vh;
+    line-height:1.45;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .wrap{max-width:560px;margin:0 auto;padding:18px 16px 56px;}
+
+  /* Header */
+  header{margin:8px 0 14px;}
+  .greeting{font-size:15px;color:var(--ink-soft);font-weight:600;}
+  h1{font-size:24px;margin:2px 0 0;font-weight:800;letter-spacing:-.3px;}
+
+  .datebar{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--card);border-radius:18px;padding:8px;margin-top:14px;
+    box-shadow:var(--shadow-sm);
+  }
+  .navbtn{
+    border:none;background:#faf4f8;color:var(--rose-deep);
+    width:42px;height:42px;border-radius:13px;font-size:20px;font-weight:700;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;
+    transition:transform .08s ease, background .15s ease;
+  }
+  .navbtn:active{transform:scale(.92);}
+  .datebar .dateinfo{text-align:center;flex:1;min-width:0;}
+  .datebar .dow{font-size:13px;color:var(--ink-soft);font-weight:600;}
+  .datebar .full{font-size:16px;font-weight:700;}
+  .todaytag{
+    display:inline-block;font-size:11px;font-weight:700;color:var(--teal);
+    background:var(--teal-soft);padding:1px 8px;border-radius:999px;margin-top:2px;
+  }
+  .todaybtn{
+    display:block;margin:10px auto 0;border:none;background:transparent;
+    color:var(--rose-deep);font-weight:700;font-size:13px;cursor:pointer;
+    text-decoration:underline;
+  }
+
+  /* Progress */
+  .progress{
+    display:flex;align-items:center;gap:14px;
+    background:var(--card);border-radius:20px;padding:16px;margin-top:14px;
+    box-shadow:var(--shadow);
+  }
+  .ring{position:relative;width:64px;height:64px;flex:0 0 auto;}
+  .ring svg{transform:rotate(-90deg);}
+  .ring .num{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:15px;font-weight:800;
+  }
+  .progress .ptext{min-width:0;}
+  .progress .ptitle{font-size:16px;font-weight:700;}
+  .progress .psub{font-size:13px;color:var(--ink-soft);}
+
+  /* Banner */
+  .banner{
+    border-radius:18px;padding:14px 16px;margin-top:14px;
+    box-shadow:var(--shadow-sm);font-size:14px;
+  }
+  .banner.transfer{background:linear-gradient(135deg,#ffe6ee,#ffeede);border:1px solid #ffd3df;}
+  .banner.test{background:var(--amber-soft);border:1px solid #ffe2bd;}
+  .banner.past{background:#f2f0f6;border:1px solid var(--line);color:var(--ink-soft);}
+  .banner b{display:block;font-size:15px;margin-bottom:3px;}
+
+  /* Slots */
+  .slot{margin-top:22px;}
+  .slot-head{display:flex;align-items:baseline;gap:8px;padding:0 4px 8px;}
+  .slot-head .ico{font-size:18px;}
+  .slot-head .nm{font-size:17px;font-weight:800;}
+  .slot-head .sub{font-size:12px;color:var(--ink-soft);font-weight:600;}
+  .slot-head .count{margin-left:auto;font-size:12px;color:var(--ink-soft);font-weight:700;}
+
+  .card-list{display:flex;flex-direction:column;gap:10px;}
+  .med{
+    display:flex;align-items:center;gap:13px;width:100%;text-align:left;
+    background:var(--card);border:1.5px solid var(--line);border-radius:16px;
+    padding:13px 14px;cursor:pointer;
+    transition:border-color .15s ease, background .15s ease, transform .07s ease;
+  }
+  .med:active{transform:scale(.985);}
+  .med .check{
+    flex:0 0 auto;width:28px;height:28px;border-radius:50%;
+    border:2.5px solid #d9cfdb;display:flex;align-items:center;justify-content:center;
+    transition:all .18s ease;
+  }
+  .med .check svg{width:16px;height:16px;opacity:0;transform:scale(.4);transition:all .18s ease;}
+  .med .body{flex:1;min-width:0;}
+  .med .name{font-weight:700;font-size:15.5px;}
+  .med .meta{font-size:12.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:1px;}
+  .med .form{
+    display:inline-flex;align-items:center;gap:4px;font-weight:600;
+    padding:1px 7px;border-radius:999px;font-size:11px;
+  }
+  .form.tablet{background:#eef0fb;color:#5d6bc0;}
+  .form.injection{background:#fdeef0;color:#cf5e77;}
+  .form.vaginal{background:#fbeef7;color:#b25aa0;}
+  .med .dose{
+    flex:0 0 auto;font-weight:800;font-size:13px;color:var(--ink);
+    background:#f7f3f8;border-radius:10px;padding:5px 9px;
+  }
+  /* taken state */
+  .med.done{background:var(--green-soft);border-color:#bfe8cf;}
+  .med.done .check{background:var(--green);border-color:var(--green);}
+  .med.done .check svg{opacity:1;transform:scale(1);}
+  .med.done .name{text-decoration:line-through;color:var(--ink-soft);}
+  .med.done .dose{background:#d9f0e2;color:#2f8a57;}
+
+  /* Appointments */
+  .appts{margin-top:28px;}
+  .appts h2{font-size:15px;font-weight:800;padding:0 4px;margin:0 0 10px;color:var(--ink);}
+  .appt{
+    display:flex;gap:12px;background:var(--card);border-radius:16px;
+    padding:12px 14px;box-shadow:var(--shadow-sm);margin-bottom:10px;
+  }
+  .appt .when{
+    flex:0 0 52px;text-align:center;background:var(--teal-soft);color:var(--teal);
+    border-radius:12px;padding:6px 4px;font-weight:800;
+  }
+  .appt .when .d{font-size:18px;line-height:1;}
+  .appt .when .m{font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+  .appt .what .t{font-weight:700;font-size:14.5px;}
+  .appt .what .det{font-size:12.5px;color:var(--ink-soft);margin-top:2px;}
+
+  /* Footer */
+  footer{margin-top:26px;text-align:center;}
+  .resetbtn{
+    border:1.5px solid var(--line);background:var(--card);color:var(--ink-soft);
+    border-radius:12px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;
+  }
+  .resetbtn:active{transform:scale(.96);}
+  .disclaimer{
+    margin-top:16px;font-size:11.5px;color:var(--ink-soft);line-height:1.5;
+    background:#fbf8fb;border-radius:14px;padding:12px 14px;border:1px solid var(--line);
+  }
+  .disclaimer b{color:var(--rose-deep);}
+  .emptyslot{font-size:13px;color:var(--ink-soft);padding:4px;}
+  .celebrate{font-size:13px;color:var(--green);font-weight:700;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="greeting" id="greeting">Hello 💛</div>
+    <h1>My Medication Tracker</h1>
+
+    <div class="datebar">
+      <button class="navbtn" id="prevDay" aria-label="Previous day">‹</button>
+      <div class="dateinfo">
+        <div class="dow" id="dow">—</div>
+        <div class="full" id="fulldate">—</div>
+        <span class="todaytag" id="todaytag" style="display:none">Today</span>
+      </div>
+      <button class="navbtn" id="nextDay" aria-label="Next day">›</button>
+    </div>
+    <button class="todaybtn" id="goToday" style="display:none">↩ Back to today</button>
+  </header>
+
+  <div class="progress">
+    <div class="ring">
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="27" fill="none" stroke="#f0e7ef" stroke-width="8"/>
+        <circle id="ringFill" cx="32" cy="32" r="27" fill="none" stroke="#46b87a" stroke-width="8"
+                stroke-linecap="round" stroke-dasharray="169.6" stroke-dashoffset="169.6"/>
+      </svg>
+      <div class="num" id="ringNum">0/0</div>
+    </div>
+    <div class="ptext">
+      <div class="ptitle" id="ptitle">Let's get started</div>
+      <div class="psub" id="psub">Tap each medicine once you've taken it.</div>
+    </div>
+  </div>
+
+  <div id="banner"></div>
+  <div id="slots"></div>
+
+  <section class="appts" id="appts"></section>
+
+  <footer>
+    <button class="resetbtn" id="resetDay">Reset today's check marks</button>
+    <div class="disclaimer">
+      This is a <b>personal reminder tool</b> only. Always follow the exact instructions from
+      Instituto Bernabeu and your doctors. <b>Never stop any medication unless your clinic tells you to.</b>
+      If anything here doesn't match your prescription, trust your clinic — not this app.
+    </div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- Date helpers (timezone-safe integer keys) ---------- */
+  function ymdInt(d){ return d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate(); }
+  function D(y,m,d){ return y*10000 + m*100 + d; }
+  function keyOf(d){
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return d.getFullYear()+'-'+m+'-'+day;
+  }
+  function startOfToday(){ var n=new Date(); return new Date(n.getFullYear(),n.getMonth(),n.getDate()); }
+
+  var DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  /* ---------- Slots ---------- */
+  var SLOTS = [
+    {id:'morning', label:'Morning', icon:'☀️', sub:'With breakfast'},
+    {id:'midday',  label:'Midday',  icon:'🌤️', sub:'At lunchtime'},
+    {id:'evening', label:'Evening', icon:'🌙', sub:'With / after dinner'}
+  ];
+
+  /* ---------- Schedule ----------
+     Mirrors the Instituto Bernabeu embryo-transfer plan + her extra meds.
+     Dates are inclusive start dates. Cyclogest changes from once to twice daily on 12 Jun. */
+  function dosesFor(date){
+    var t = ymdInt(date);
+    var list = [];
+    function add(slot,name,dose,form,note){ list.push({slot:slot,name:name,dose:dose,form:form,note:note}); }
+
+    // Continuous daily meds
+    add('morning','Thyroid medication','50 mcg','tablet','Take in the morning');
+    add('morning','Hydroxychloroquine','200 mg','tablet',null);
+    add('morning','Aspirin','100 mg','tablet','1 pill in the morning');
+
+    // From 1 week before transfer (09 Jun)
+    if (t >= D(2026,6,9)){
+      add('morning','Prednisone','25 mg','tablet','Once per day, in the morning');
+      add('evening','Clexane','40 mg','injection','1 injection in the evening');
+    }
+
+    // Progynova from 11 Jun — three times a day
+    if (t >= D(2026,6,11)){
+      add('morning','Progynova','2 mg','tablet','1 tablet with breakfast');
+      add('midday','Progynova','2 mg','tablet','1 tablet at lunchtime');
+      add('evening','Progynova','2 mg','tablet','1 tablet in the evening');
+    }
+
+    // Cyclogest: 11 Jun = evening only; from 12 Jun = morning AND evening
+    if (t === D(2026,6,11)){
+      add('evening','Cyclogest','400 mg','vaginal','1 capsule, vaginal');
+    } else if (t >= D(2026,6,12)){
+      add('morning','Cyclogest','400 mg','vaginal','1 capsule, vaginal');
+      add('evening','Cyclogest','400 mg','vaginal','1 capsule, vaginal');
+    }
+
+    // Evening hydroxychloroquine (added last so morning meds group nicely)
+    add('evening','Hydroxychloroquine','200 mg','tablet',null);
+
+    return list;
+  }
+
+  /* ---------- Appointments / milestones ---------- */
+  var APPTS = [
+    {date:D(2026,6,8),  title:'Ultrasound scan',
+     detail:'Measure endometrial thickness & check ovaries. Send both pictures + report before 13:00 (Spanish time).'},
+    {date:D(2026,6,15), title:'Progesterone blood test',
+     detail:'Day 3–4 of progesterone. A blood test is needed to measure the progesterone level.'},
+    {date:D(2026,6,16), title:'Embryo transfer day 💛',
+     detail:'Vaginal scan 13:00 — Velázquez 48 (Dr. Olalla). Transfer 15:00 — Ayala 48 (Dr. Romero); arrive 15 min early. Start drinking water before coming. Take ALL medication as usual, including this morning.'}
+  ];
+
+  /* ---------- Storage ---------- */
+  var STORE = 'ib-med-tracker-v1';
+  function loadAll(){
+    try{ return JSON.parse(localStorage.getItem(STORE)) || {}; }
+    catch(e){ return {}; }
+  }
+  function saveAll(o){ try{ localStorage.setItem(STORE, JSON.stringify(o)); }catch(e){} }
+  function doseId(d){ return d.slot+'|'+d.name+'|'+d.dose; }
+
+  /* ---------- State ---------- */
+  var view = startOfToday();
+  var data = loadAll();
+
+  /* ---------- Rendering ---------- */
+  var slotsEl   = document.getElementById('slots');
+  var bannerEl  = document.getElementById('banner');
+  var apptsEl   = document.getElementById('appts');
+
+  function fmtMonthDay(intDate){
+    var d = intDate % 100, m = Math.floor(intDate/100)%100;
+    return {d:d, m:MON[m-1]};
+  }
+
+  function render(){
+    var k = keyOf(view);
+    var dayData = data[k] || {};
+    var doses = dosesFor(view);
+    var todayInt = ymdInt(startOfToday());
+    var viewInt = ymdInt(view);
+    var isToday = todayInt === viewInt;
+
+    /* date bar */
+    document.getElementById('dow').textContent = DOW[view.getDay()];
+    document.getElementById('fulldate').textContent =
+      view.getDate()+' '+MONTHS[view.getMonth()]+' '+view.getFullYear();
+    document.getElementById('todaytag').style.display = isToday ? '' : 'none';
+    document.getElementById('goToday').style.display = isToday ? 'none' : '';
+
+    var hr = new Date().getHours();
+    document.getElementById('greeting').textContent =
+      (hr<12?'Good morning':hr<18?'Good afternoon':'Good evening')+' 💛';
+
+    /* progress */
+    var total = doses.length;
+    var done = doses.filter(function(d){ return dayData[doseId(d)]; }).length;
+    var pct = total ? done/total : 0;
+    var circ = 2*Math.PI*27;
+    document.getElementById('ringFill').setAttribute('stroke-dasharray', circ.toFixed(1));
+    document.getElementById('ringFill').setAttribute('stroke-dashoffset', (circ*(1-pct)).toFixed(1));
+    document.getElementById('ringNum').textContent = done+'/'+total;
+    var ptitle = document.getElementById('ptitle');
+    var psub = document.getElementById('psub');
+    if (total===0){ ptitle.textContent='No medication listed'; psub.textContent='Nothing scheduled for this day.'; }
+    else if (done===total){ ptitle.textContent='All done for today! 🎉'; psub.innerHTML='<span class="celebrate">Every medicine ticked off. Great job.</span>'; }
+    else { ptitle.textContent = done+' of '+total+' taken'; psub.textContent = (total-done)+' still to take. Tap each one when done.'; }
+
+    /* banner for special days */
+    bannerEl.innerHTML = '';
+    var ap = APPTS.filter(function(a){ return a.date===viewInt; })[0];
+    if (ap){
+      var cls = ap.title.indexOf('transfer')>-1 ? 'transfer' : (viewInt<todayInt ? 'past' : 'test');
+      bannerEl.innerHTML = '<div class="banner '+cls+'"><b>📍 '+ap.title+'</b>'+ap.detail+'</div>';
+    }
+
+    /* slots */
+    slotsEl.innerHTML = '';
+    SLOTS.forEach(function(slot){
+      var items = doses.filter(function(d){ return d.slot===slot.id; });
+      if (!items.length) return;
+      var sdone = items.filter(function(d){ return dayData[doseId(d)]; }).length;
+
+      var sec = document.createElement('div');
+      sec.className = 'slot';
+      var head = '<div class="slot-head"><span class="ico">'+slot.icon+'</span>'+
+                 '<span class="nm">'+slot.label+'</span>'+
+                 '<span class="sub">'+slot.sub+'</span>'+
+                 '<span class="count">'+sdone+'/'+items.length+'</span></div>';
+      var cards = '<div class="card-list">';
+      items.forEach(function(d){
+        var id = doseId(d);
+        var on = !!dayData[id];
+        var formLabel = d.form==='vaginal'?'vaginal':(d.form==='injection'?'injection':'tablet');
+        var formIco = d.form==='vaginal'?'🌸':(d.form==='injection'?'💉':'💊');
+        cards += '<button class="med'+(on?' done':'')+'" data-id="'+encodeURIComponent(id)+'" aria-pressed="'+on+'">'+
+          '<span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l5 5L19 7"/></svg></span>'+
+          '<span class="body"><span class="name">'+d.name+'</span>'+
+          '<span class="meta"><span class="form '+d.form+'">'+formIco+' '+formLabel+'</span>'+
+          (d.note?('<span>'+d.note+'</span>'):'')+'</span></span>'+
+          '<span class="dose">'+d.dose+'</span>'+
+          '</button>';
+      });
+      cards += '</div>';
+      sec.innerHTML = head + cards;
+      slotsEl.appendChild(sec);
+    });
+
+    /* upcoming appointments */
+    var upcoming = APPTS.filter(function(a){ return a.date >= todayInt; });
+    if (upcoming.length){
+      var html = '<h2>📅 Upcoming appointments</h2>';
+      upcoming.forEach(function(a){
+        var md = fmtMonthDay(a.date);
+        html += '<div class="appt"><div class="when"><div class="d">'+md.d+'</div><div class="m">'+md.m+'</div></div>'+
+                '<div class="what"><div class="t">'+a.title+'</div><div class="det">'+a.detail+'</div></div></div>';
+      });
+      apptsEl.innerHTML = html;
+      apptsEl.style.display = '';
+    } else {
+      apptsEl.style.display = 'none';
+    }
+  }
+
+  /* ---------- Events ---------- */
+  slotsEl.addEventListener('click', function(e){
+    var btn = e.target.closest('.med');
+    if (!btn) return;
+    var id = decodeURIComponent(btn.getAttribute('data-id'));
+    var k = keyOf(view);
+    if (!data[k]) data[k] = {};
+    if (data[k][id]) delete data[k][id]; else data[k][id] = true;
+    if (Object.keys(data[k]).length===0) delete data[k];
+    saveAll(data);
+    render();
+  });
+
+  document.getElementById('prevDay').addEventListener('click', function(){
+    view = new Date(view.getFullYear(),view.getMonth(),view.getDate()-1); render();
+  });
+  document.getElementById('nextDay').addEventListener('click', function(){
+    view = new Date(view.getFullYear(),view.getMonth(),view.getDate()+1); render();
+  });
+  document.getElementById('goToday').addEventListener('click', function(){
+    view = startOfToday(); render();
+  });
+  document.getElementById('resetDay').addEventListener('click', function(){
+    var k = keyOf(view);
+    if (data[k] && confirm("Clear all check marks for this day?")){
+      delete data[k]; saveAll(data); render();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
