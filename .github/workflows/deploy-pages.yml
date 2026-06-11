@@ -1,0 +1,47 @@
+name: Deploy medication tracker to GitHub Pages
+
+on:
+  push:
+    branches:
+      - claude/vibrant-mendel-mhdnt2
+    paths:
+      - 'med-tracker/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment, skipping queued runs in between
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Turn Pages on automatically if it isn't already enabled
+          enablement: true
+      - name: Upload med-tracker as the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: med-tracker
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
