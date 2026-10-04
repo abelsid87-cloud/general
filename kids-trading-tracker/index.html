@@ -7,11 +7,13 @@
 <link rel="manifest" href="manifest.webmanifest">
 <title>Kids Trading Tracker</title>
 <style>
-:root{--bg:#0f1419;--card:#1a212b;--line:#2a3441;--text:#e8edf2;--dim:#8b98a8;--up:#34d399;--down:#f87171;--accent:#60a5fa}
-@media (prefers-color-scheme:light){:root{--bg:#f4f6f9;--card:#fff;--line:#dde3ea;--text:#111827;--dim:#6b7280;--up:#059669;--down:#dc2626;--accent:#2563eb}}
+:root{--bg:#f4f6f9;--card:#fff;--line:#dde3ea;--text:#111827;--dim:#5b6573;--up:#047857;--down:#dc2626;--accent:#2563eb;--flag:#dc26261a;--shadow:#0002}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1419;--card:#1a212b;--line:#2a3441;--text:#e8edf2;--dim:#8b98a8;--up:#34d399;--down:#f87171;--accent:#3b82f6;--flag:#f871711a;--shadow:#0008;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1419;--card:#1a212b;--line:#2a3441;--text:#e8edf2;--dim:#8b98a8;--up:#34d399;--down:#f87171;--accent:#3b82f6;--flag:#f871711a;--shadow:#0008;color-scheme:dark}
+[hidden]{display:none!important}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding-bottom:90px}
-header{position:sticky;top:0;background:var(--bg);padding:12px 16px 8px;z-index:5;border-bottom:1px solid var(--line)}
+header{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:12px 16px 8px;z-index:5;border-bottom:1px solid var(--line)}
 h1{font-size:18px;margin:0 0 8px}
 .tabs{display:flex;gap:8px;overflow-x:auto}
 .tab{padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text);white-space:nowrap;font:inherit}
@@ -28,12 +30,13 @@ h2{font-size:15px;margin:22px 0 8px;color:var(--dim);text-transform:uppercase;le
 .row:last-child{border:0}
 .r{text-align:right;font-variant-numeric:tabular-nums}
 button{font:inherit;cursor:pointer}
-.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));background:var(--accent);color:#fff;border:0;border-radius:999px;padding:14px 22px;font-weight:600;box-shadow:0 4px 14px #0006}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--accent);color:#fff;border:0;border-radius:999px;padding:14px 22px;font-weight:600;box-shadow:0 4px 14px var(--shadow)}
 .btn{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.del{color:var(--down)}
 dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);width:min(92vw,420px);padding:16px}
 dialog::backdrop{background:#0008}
+#uMsg{white-space:pre-wrap;margin-bottom:6px}
 label{display:block;margin:10px 0 2px;color:var(--dim);font-size:13px}
 input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
 .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
@@ -45,7 +48,7 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
 .tag{font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim);margin-right:6px}
 .px{width:96px;padding:4px 6px;text-align:right}
 #symWrap{position:relative}
-.list{position:absolute;left:0;right:0;top:100%;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;box-shadow:0 6px 18px #0006}
+.list{position:absolute;left:0;right:0;top:100%;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;box-shadow:0 6px 18px var(--shadow)}
 .list div{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
 .list div:last-child{border:0}
 .list .nm{font-size:12px;color:var(--dim)}
@@ -97,6 +100,15 @@ window.addEventListener('error', function (e) {
   <input type="file" id="file" accept="application/json" hidden>
 </dialog>
 
+<dialog id="udlg">
+  <form id="uForm" method="dialog">
+    <div id="uMsg"></div>
+    <input id="uIn" hidden autocomplete="off">
+    <textarea id="uArea" rows="6" readonly hidden style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:12px monospace"></textarea>
+    <div class="acts"><button type="button" class="btn" id="uNo">Cancel</button><span id="uAlts" style="display:contents"></span><button type="button" class="btn pri" id="uOk">OK</button></div>
+  </form>
+</dialog>
+
 <dialog id="mdlg">
   <b>Merge trades</b>
   <label>Choose the file the child sent</label><input type="file" id="mFile" accept=".json,application/json,text/plain">
@@ -113,6 +125,37 @@ const TYPE_LABEL = { buy: 'Buy', sell: 'Sell', deposit: 'Add money', withdraw: '
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
+function ask(o) {
+  return new Promise(res => {
+    const d = $('udlg'), inp = $('uIn'), ar = $('uArea'), alts = $('uAlts');
+    $('uMsg').textContent = o.text || '';
+    inp.hidden = !o.input; inp.value = o.value || '';
+    ar.hidden = o.area == null; ar.value = o.area || '';
+    $('uOk').textContent = o.ok || 'OK'; $('uNo').hidden = !o.cancel; $('uNo').textContent = o.cancel || 'Cancel';
+    alts.innerHTML = '';
+    (o.alts || []).forEach(a => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = a.label; b.onclick = () => a.fn(b, ar); alts.appendChild(b); });
+    let done = false;
+    const fin = v => { if (done) return; done = true; d.close(); res(v); };
+    $('uOk').onclick = () => fin(o.input ? inp.value : true);
+    $('uNo').onclick = () => fin(o.input ? null : false);
+    $('uForm').onsubmit = e => { e.preventDefault(); $('uOk').click(); };
+    d.oncancel = e => { e.preventDefault(); fin(o.input ? null : false); };
+    d.showModal();
+    if (o.input) { inp.focus(); inp.select(); } else if (o.area != null) { ar.focus(); ar.select(); }
+  });
+}
+const ui = {
+  confirm: (text, ok) => ask({ text, ok: ok || 'Yes', cancel: 'Cancel' }),
+  prompt: (text, value, ok) => ask({ text, input: true, value, ok: ok || 'Save', cancel: 'Cancel' }),
+  notice: text => ask({ text, ok: 'OK' })
+};
+// Shows text the user can copy (and optionally save as a file) — works where file downloads or sharing are blocked.
+function showExport(o) {
+  const alts = [{ label: 'Copy', fn: async (b, ar) => { try { await navigator.clipboard.writeText(o.data); b.textContent = 'Copied ✓'; if (o.onCopy) o.onCopy(); } catch (e) { ar.focus(); ar.select(); b.textContent = 'Press and hold to copy'; } } }];
+  if (o.file) alts.push({ label: 'Save file', fn: () => download(o.file, o.data, o.mime || 'text/plain') });
+  return ask({ text: o.text, area: o.data, ok: 'Close', alts });
+}
+
 let S = load();
 let curKid = S.kids[0] ? S.kids[0].id : null;
 let editId = null, curType = 'buy';
@@ -121,7 +164,7 @@ function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; s.dirty = s.dirty || {}; return s; } } catch (e) {}
   return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {}, dirty: {} };
 }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { alert('Could not save: storage unavailable or full.'); } }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { ui.notice('Could not save: storage is unavailable or full. Use ⋯ → Backup to keep a copy.'); } }
 
 const aed = n => (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const signed = n => (n > 0 ? '+' : '') + aed(n);
@@ -173,8 +216,9 @@ function render() {
 
   const main = $('main');
   $('add').style.display = curKid ? '' : 'none';
-  if (!curKid) { main.innerHTML = '<div class="card" style="text-align:center;padding:24px 16px"><div style="font-size:40px">📈</div><h2 style="color:var(--text);text-transform:none;font-size:20px">Welcome!</h2><div class="lbl">Who is this for?</div><input id="firstName" placeholder="Your name" style="margin:12px 0;text-align:center" autocomplete="off"><button class="btn pri" id="firstKid" style="width:100%;padding:12px">Start</button><div class="lbl" style="margin-top:12px">Mom: add each child here, then use ⋯ to merge what they send you.</div></div>';
+  if (!curKid) { main.innerHTML = '<div class="card" style="text-align:center;padding:24px 16px"><div style="font-size:40px">📈</div><h2 style="color:var(--text);text-transform:none;font-size:20px">Welcome!</h2><div class="lbl">Who is this for?</div><input id="firstName" placeholder="Your name" style="margin:12px 0;text-align:center" autocomplete="off"><button class="btn pri" id="firstKid" style="width:100%;padding:12px">Start</button><button class="btn" id="exampleBtn" style="width:100%;margin-top:8px">Just show me an example</button><div class="lbl" style="margin-top:12px">Mom: add each child here, then use ⋯ to merge what they send you.</div></div>';
     $('firstKid').onclick = () => { const n = $('firstName').value.trim(); if (!n) { $('firstName').focus(); return; } const k = { id: uid(), name: n }; S.kids.push(k); curKid = k.id; save(); render(); };
+    $('exampleBtn').onclick = loadExample;
     return; }
   const c = compute(curKid);
   const tot = c.total;
@@ -204,7 +248,7 @@ function render() {
   list.forEach(t => {
     const amt = t.type === 'deposit' || t.type === 'withdraw' ? t.price : t.qty * t.price;
     const detail = t.type === 'deposit' || t.type === 'withdraw' ? '' : `${esc(t.symbol)} · ${+t.qty} @ ${aed(t.price)}${t.fee ? ' · fee ' + aed(t.fee) : ''}`;
-    h += `<div class="row" data-id="${t.id}" style="cursor:pointer;${c.issues.has(t.id) ? 'background:#f871711a' : ''}">
+    h += `<div class="row" data-id="${t.id}" style="cursor:pointer;${c.issues.has(t.id) ? 'background:var(--flag)' : ''}">
       <div><span class="tag">${TYPE_LABEL[t.type] || t.type}</span>${detail}<div class="lbl">${t.date}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
       <div class="r">${aed(amt)}</div></div>`;
   });
@@ -223,6 +267,16 @@ function render() {
   main.querySelectorAll('[data-id]').forEach(r => r.onclick = () => openForm(r.dataset.id));
 }
 
+function loadExample() {
+  const k = { id: uid(), name: 'Example' }; S.kids.push(k); curKid = k.id;
+  const add = (type, date, symbol, qty, price, fee) => S.txs.push(Object.assign({ id: uid(), upd: Date.now(), kid: k.id, type, date, price, note: 'example' }, symbol ? { symbol, qty, fee: fee || 0 } : {}));
+  add('deposit', '2026-08-01', null, 0, 6000);
+  add('buy', '2026-08-03', 'VOO', 2, 1840, 5);
+  add('buy', '2026-08-20', 'AAPL', 5, 220, 3);
+  add('sell', '2026-09-15', 'AAPL', 2, 245, 3);
+  S.prices.VOO = 1885; S.prices.AAPL = 238;
+  save(); render();
+}
 function setType(t) {
   curType = t;
   const names = TYPE_LABEL;
@@ -244,11 +298,11 @@ function openForm(id) {
   $('dlg').showModal();
 }
 $('add').onclick = () => openForm();
-$('cancel').onclick = () => {
-  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); S.tomb[editId] = Date.now(); S.dirty[curKid] = true; save(); render(); }
+$('cancel').onclick = async () => {
+  if (editId && await ui.confirm('Delete this transaction?', 'Delete')) { S.txs = S.txs.filter(x => x.id !== editId); S.tomb[editId] = Date.now(); S.dirty[curKid] = true; save(); render(); }
   $('dlg').close();
 };
-$('form').onsubmit = e => {
+$('form').onsubmit = async e => {
   e.preventDefault();
   const cash = curType === 'deposit' || curType === 'withdraw';
   const price = parseFloat($('fPx').value), qty = parseFloat($('fQty').value), fee = parseFloat($('fFee').value) || 0;
@@ -264,7 +318,7 @@ $('form').onsubmit = e => {
   const prev = S.txs.slice();
   if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
   const c = compute(curKid);
-  if (c.issues.has(tx.id) || c.issues.size && !confirm('This leaves some transactions invalid (selling more than held, or cash below zero). Save anyway?')) {
+  if (c.issues.has(tx.id) || c.issues.size && !(await ui.confirm('This leaves some transactions invalid (selling more than held, or cash below zero). Save anyway?', 'Save anyway'))) {
     if (c.issues.has(tx.id)) { S.txs = prev; return bad(curType === 'sell' ? 'Cannot sell more than held at that date.' : 'Not enough cash at that date — add a deposit first.'); }
     S.txs = prev; return;
   }
@@ -369,8 +423,8 @@ async function refreshPrices() {
   const c = compute(curKid), btn = $('refresh');
   const targets = c.holdings.filter(h => S.meta[h.sym]);
   const skipped = c.holdings.length - targets.length;
-  if (!getKey()) return alert('Add your price data API key first (⋯ menu).');
-  if (!targets.length) return alert('No holdings with a linked symbol. Pick the symbol from the search list when adding a trade.');
+  if (!getKey()) return ui.notice('Add your price data API key first (⋯ menu).');
+  if (!targets.length) return ui.notice('No holdings with a linked symbol. Pick the symbol from the search list when adding a trade.');
   btn.disabled = true; const errs = [];
   const fxCache = {};
   const hhmm = () => new Date().toTimeString().slice(0, 5);
@@ -386,13 +440,13 @@ async function refreshPrices() {
   }
   save(); render();
   const note = errs.concat(skipped ? [skipped + ' holding(s) without a linked symbol were not refreshed.'] : []);
-  if (note.length) alert(note.join('\n'));
+  if (note.length) ui.notice(note.join('\n'));
 }
-$('mKey').onclick = () => {
-  const k = prompt('Paste your Twelve Data API key (free at twelvedata.com). Leave empty to remove it. It is stored only on this device.', getKey());
-  if (k === null) return;
-  try { if (k.trim()) localStorage.setItem(KEYK, k.trim()); else localStorage.removeItem(KEYK); } catch (e) { alert('Could not store key.'); }
+$('mKey').onclick = async () => {
   $('menu').close();
+  const k = await ui.prompt('Paste your Twelve Data API key (free at twelvedata.com). Leave empty to remove it. It is stored only on this device.', getKey());
+  if (k === null) return;
+  try { if (k.trim()) localStorage.setItem(KEYK, k.trim()); else localStorage.removeItem(KEYK); } catch (e) { ui.notice('Could not store the key.'); }
 };
 
 function needsInstallTip() {
@@ -451,8 +505,8 @@ async function shareCurrent() {
     if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'My trades' }); S.dirty[curKid] = false; save(); render(); return; }
     if (navigator.share) { await navigator.share({ text, title: 'My trades' }); S.dirty[curKid] = false; save(); render(); return; }
   } catch (e) { if (e && e.name === 'AbortError') return; }
-  download(name, text, 'application/json'); S.dirty[curKid] = false; save(); render();
-  try { await navigator.clipboard.writeText(text); alert('Saved a file and copied the data. Send either one to mom.'); } catch (e) { alert('Saved a file. Send it to mom.'); }
+  const kidId = curKid;
+  await showExport({ text: 'Copy this and send it to Mom (for example in WhatsApp). She pastes it into Merge.', data: text, file: name, mime: 'application/json', onCopy: () => { S.dirty[kidId] = false; save(); render(); } });
 }
 $('mShare').onclick = () => { $('menu').close(); shareCurrent(); };
 $('mMerge').onclick = () => { $('menu').close(); $('mText').value = ''; $('mErr').textContent = ''; $('mFile').value = ''; $('mdlg').showModal(); };
@@ -467,17 +521,18 @@ $('mdGo').onclick = () => {
   } catch (e) { $('mErr').textContent = e instanceof SyntaxError ? 'That text is not valid — copy the whole message.' : e.message; }
 };
 
-function addKid() {
-  const n = (prompt('Child name?') || '').trim(); if (!n) return;
+async function addKid() {
+  const n = ((await ui.prompt('Child name?', '', 'Add')) || '').trim(); if (!n) return;
   const k = { id: uid(), name: n }; S.kids.push(k); curKid = k.id; save(); render();
 }
 const curName = () => (S.kids.find(k => k.id === curKid) || {}).name;
 $('mClose').onclick = () => $('menu').close();
 $('mAddKid').onclick = () => { $('menu').close(); addKid(); };
-$('mRenKid').onclick = () => { if (!curKid) return; const n = (prompt('New name?', curName()) || '').trim(); if (n) { S.kids.find(k => k.id === curKid).name = n; save(); } $('menu').close(); render(); };
-$('mDelKid').onclick = () => {
+$('mRenKid').onclick = async () => { $('menu').close(); if (!curKid) return; const n = ((await ui.prompt('New name?', curName())) || '').trim(); if (n) { S.kids.find(k => k.id === curKid).name = n; save(); } render(); };
+$('mDelKid').onclick = async () => {
+  $('menu').close();
   if (!curKid) return;
-  if (confirm('Delete ' + curName() + ' and ALL their transactions? This cannot be undone. Make a backup first.')) {
+  if (await ui.confirm('Delete ' + curName() + ' and ALL their transactions? This cannot be undone. Make a backup first.', 'Delete')) {
     S.txs.filter(t => t.kid === curKid).forEach(t => { S.tomb[t.id] = Date.now(); }); S.txs = S.txs.filter(t => t.kid !== curKid); S.kids = S.kids.filter(k => k.id !== curKid); curKid = S.kids[0] ? S.kids[0].id : null; save();
   }
   $('menu').close(); render();
@@ -485,12 +540,12 @@ $('mDelKid').onclick = () => {
 function download(name, text, type) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-$('mExport').onclick = () => { download('trading-backup-' + today() + '.json', JSON.stringify(S, null, 1), 'application/json'); $('menu').close(); };
+$('mExport').onclick = () => { $('menu').close(); showExport({ text: 'Backup of everything on this device. Copy it somewhere safe (for example Notes).', data: JSON.stringify(S, null, 1), file: 'trading-backup-' + today() + '.json', mime: 'application/json' }); };
 $('mCsv').onclick = () => {
   const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
   const rows = [['child', 'date', 'type', 'symbol', 'quantity', 'price_or_amount_AED', 'fee_AED', 'note']];
   S.txs.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => rows.push([(S.kids.find(k => k.id === t.kid) || {}).name, t.date, t.type, t.symbol, t.qty, t.price, t.fee, t.note]));
-  download('transactions-' + today() + '.csv', rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv'); $('menu').close();
+  $('menu').close(); showExport({ text: 'All transactions as a table (CSV).', data: rows.map(r => r.map(q).join(',')).join('\n'), file: 'transactions-' + today() + '.csv', mime: 'text/csv' });
 };
 $('mImport').onclick = () => $('file').click();
 $('file').onchange = async e => {
@@ -498,9 +553,9 @@ $('file').onchange = async e => {
   try {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
-    if (!confirm('Replace ALL current data with this backup?')) return;
+    if (!(await ui.confirm('Replace ALL current data with this backup?', 'Replace'))) return;
     S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {}, dirty: {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
-  } catch (_) { alert('Not a valid backup file.'); }
+  } catch (_) { ui.notice('Not a valid backup file.'); }
   e.target.value = '';
 };
 
