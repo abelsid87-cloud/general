@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1419">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Kids Trading Tracker</title>
+<style>
+:root{--bg:#0f1419;--card:#1a212b;--line:#2a3441;--text:#e8edf2;--dim:#8b98a8;--up:#34d399;--down:#f87171;--accent:#60a5fa}
+@media (prefers-color-scheme:light){:root{--bg:#f4f6f9;--card:#fff;--line:#dde3ea;--text:#111827;--dim:#6b7280;--up:#059669;--down:#dc2626;--accent:#2563eb}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding-bottom:90px}
+header{position:sticky;top:0;background:var(--bg);padding:12px 16px 8px;z-index:5;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 8px}
+.tabs{display:flex;gap:8px;overflow-x:auto}
+.tab{padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text);white-space:nowrap;font:inherit}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+main{padding:16px;max-width:640px;margin:auto}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.lbl{color:var(--dim);font-size:12px}
+.val{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.sm{font-size:13px}
+.up{color:var(--up)}.down{color:var(--down)}
+h2{font-size:15px;margin:22px 0 8px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+.row{display:flex;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border:0}
+.r{text-align:right;font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));background:var(--accent);color:#fff;border:0;border-radius:999px;padding:14px 22px;font-weight:600;box-shadow:0 4px 14px #0006}
+.btn{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.del{color:var(--down)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);width:min(92vw,420px);padding:16px}
+dialog::backdrop{background:#0008}
+label{display:block;margin:10px 0 2px;color:var(--dim);font-size:13px}
+input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.seg button{padding:8px 0;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.seg button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.acts{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+.empty{color:var(--dim);text-align:center;padding:24px 0}
+.err{color:var(--down);font-size:13px;margin-top:8px;min-height:1em}
+.tag{font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim);margin-right:6px}
+.px{width:96px;padding:4px 6px;text-align:right}
+</style>
+</head>
+<body>
+<header>
+  <h1>Kids Trading Tracker <span class="lbl">· AED</span></h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main id="main"></main>
+<button class="fab" id="add">+ Add</button>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <div class="seg" id="typeSeg"></div>
+    <label>Date</label><input type="date" id="fDate" required>
+    <div id="symWrap"><label>Symbol / name (e.g. VOO, AAPL, EMAAR)</label><input id="fSym" autocapitalize="characters" autocomplete="off"></div>
+    <div id="qtyWrap"><label>Quantity (shares / units)</label><input id="fQty" type="number" step="any" min="0" inputmode="decimal"></div>
+    <label id="pxLbl">Price per unit (AED)</label><input id="fPx" type="number" step="any" min="0" inputmode="decimal">
+    <div id="feeWrap"><label>Fees / commission (AED, optional)</label><input id="fFee" type="number" step="any" min="0" inputmode="decimal"></div>
+    <label>Note (optional)</label><input id="fNote">
+    <div class="err" id="err"></div>
+    <div class="acts"><button type="button" class="btn" id="cancel">Cancel</button><button type="submit" class="btn pri">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="menu">
+  <div class="acts" style="flex-direction:column;align-items:stretch;margin:0">
+    <button class="btn" id="mAddKid">Add child</button>
+    <button class="btn" id="mRenKid">Rename current child</button>
+    <button class="btn del" id="mDelKid">Delete current child &amp; all their data</button>
+    <button class="btn" id="mCsv">Export transactions (CSV)</button>
+    <button class="btn" id="mExport">Backup (JSON)</button>
+    <button class="btn" id="mImport">Restore from backup</button>
+    <button class="btn" id="mClose">Close</button>
+  </div>
+  <input type="file" id="file" accept="application/json" hidden>
+</dialog>
+
+<script>
+'use strict';
+const KEY = 'kidsTrading.v1';
+const $ = id => document.getElementById(id);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+let S = load();
+let curKid = S.kids[0] ? S.kids[0].id : null;
+let editId = null, curType = 'buy';
+
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) return s; } catch (e) {}
+  return { kids: [], txs: [], prices: {} };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { alert('Could not save: storage unavailable or full.'); } }
+
+const aed = n => (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const signed = n => (n > 0 ? '+' : '') + aed(n);
+const cls = n => (Math.round(n * 100) > 0 ? 'up' : Math.round(n * 100) < 0 ? 'down' : '');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Replay a kid's transactions chronologically. Average-cost method; buy fees are added to cost, sell fees reduce proceeds.
+function compute(kidId) {
+  const txs = S.txs.filter(t => t.kid === kidId)
+    .map((t, i) => ({ t, i })).sort((a, b) => a.t.date.localeCompare(b.t.date) || a.i - b.i).map(x => x.t);
+  let cash = 0, deposited = 0, withdrawn = 0, realized = 0, fees = 0;
+  const pos = {}; const issues = [];
+  for (const t of txs) {
+    const fee = t.fee || 0;
+    if (t.type === 'deposit') { cash += t.price; deposited += t.price; }
+    else if (t.type === 'withdraw') { cash -= t.price; withdrawn += t.price; }
+    else if (t.type === 'buy') {
+      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0 });
+      p.qty += t.qty; p.cost += t.qty * t.price + fee; cash -= t.qty * t.price + fee; fees += fee;
+    } else if (t.type === 'sell') {
+      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0 });
+      if (t.qty > p.qty + 1e-9) { issues.push(t.id); continue; }
+      const avg = p.cost / p.qty, costOut = avg * t.qty;
+      realized += t.qty * t.price - fee - costOut; fees += fee;
+      cash += t.qty * t.price - fee; p.qty -= t.qty; p.cost -= costOut;
+      if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; }
+    }
+    if (cash < -0.005) issues.push(t.id);
+  }
+  const holdings = Object.entries(pos).filter(([, p]) => p.qty > 0).map(([sym, p]) => {
+    const last = S.prices[sym];
+    const mv = last == null ? null : p.qty * last;
+    return { sym, qty: p.qty, cost: p.cost, avg: p.cost / p.qty, last, mv, upl: mv == null ? null : mv - p.cost };
+  });
+  const mvTotal = holdings.reduce((a, h) => a + (h.mv == null ? h.cost : h.mv), 0);
+  const unpriced = holdings.some(h => h.mv == null);
+  const unreal = holdings.reduce((a, h) => a + (h.upl || 0), 0);
+  const net = deposited - withdrawn, value = cash + mvTotal;
+  return { cash, deposited, withdrawn, net, realized, unreal, fees, holdings, value, total: value - net, unpriced, issues: new Set(issues) };
+}
+
+function render() {
+  const tabs = $('tabs'); tabs.innerHTML = '';
+  S.kids.forEach(k => {
+    const b = document.createElement('button'); b.className = 'tab' + (k.id === curKid ? ' on' : ''); b.textContent = k.name;
+    b.onclick = () => { curKid = k.id; render(); }; tabs.appendChild(b);
+  });
+  const m = document.createElement('button'); m.className = 'tab'; m.textContent = '⋯'; m.onclick = () => $('menu').showModal(); tabs.appendChild(m);
+
+  const main = $('main');
+  $('add').style.display = curKid ? '' : 'none';
+  if (!curKid) { main.innerHTML = '<div class="empty">No children yet.<br><br><button class="btn pri" id="firstKid">Add first child</button></div>'; $('firstKid').onclick = addKid; return; }
+  const c = compute(curKid);
+  const tot = c.total;
+  let h = `<div class="grid">
+    <div class="card"><div class="lbl">Total value</div><div class="val">${aed(c.value)}</div><div class="lbl">cash + holdings</div></div>
+    <div class="card"><div class="lbl">Total P&amp;L</div><div class="val ${cls(tot)}">${signed(tot)}</div><div class="lbl">${c.net ? signed(tot / c.net * 100).replace(/\.\d+/, m => m.slice(0, 3)) + '% of net deposits' : '—'}</div></div>
+    <div class="card"><div class="lbl">Cash (held by mom)</div><div class="val ${c.cash < -0.005 ? 'down' : ''}">${aed(c.cash)}</div></div>
+    <div class="card"><div class="lbl">Net deposited</div><div class="val">${aed(c.net)}</div></div>
+    <div class="card"><div class="lbl">Realized P&amp;L</div><div class="val sm ${cls(c.realized)}">${signed(c.realized)}</div></div>
+    <div class="card"><div class="lbl">Unrealized P&amp;L</div><div class="val sm ${cls(c.unreal)}">${signed(c.unreal)}</div></div>
+  </div>`;
+  if (c.unpriced) h += `<div class="lbl" style="margin-top:8px">⚠ Some holdings have no current price — valued at cost until you enter one.</div>`;
+  if (c.issues.size) h += `<div class="lbl down" style="margin-top:8px">⚠ ${c.issues.size} transaction(s) flagged (oversell or negative cash) — check the highlighted rows.</div>`;
+
+  h += '<h2>Holdings</h2><div class="card">';
+  if (!c.holdings.length) h += '<div class="empty">No holdings</div>';
+  c.holdings.sort((a, b) => a.sym.localeCompare(b.sym)).forEach(x => {
+    h += `<div class="row"><div><b>${esc(x.sym)}</b><div class="lbl">${+x.qty.toFixed(6)} × avg ${aed(x.avg)}</div><div class="lbl">cost ${aed(x.cost)}</div></div>
+      <div class="r"><input class="px" data-sym="${esc(x.sym)}" type="number" step="any" inputmode="decimal" placeholder="price now" value="${x.last == null ? '' : x.last}">
+      <div class="lbl">${x.mv == null ? '—' : 'value ' + aed(x.mv)}</div>
+      <div class="${x.upl == null ? '' : cls(x.upl)} sm">${x.upl == null ? '' : signed(x.upl) + ' (' + signed(x.upl / x.cost * 100).replace(/(\.\d)\d*/, '$1') + '%)'}</div></div></div>`;
+  });
+  h += '</div><h2>Transactions</h2><div class="card">';
+  const list = S.txs.filter(t => t.kid === curKid).sort((a, b) => b.date.localeCompare(a.date));
+  if (!list.length) h += '<div class="empty">Nothing yet — tap + Add</div>';
+  list.forEach(t => {
+    const amt = t.type === 'deposit' || t.type === 'withdraw' ? t.price : t.qty * t.price;
+    const detail = t.type === 'deposit' || t.type === 'withdraw' ? '' : `${esc(t.symbol)} · ${+t.qty} @ ${aed(t.price)}${t.fee ? ' · fee ' + aed(t.fee) : ''}`;
+    h += `<div class="row" data-id="${t.id}" style="cursor:pointer;${c.issues.has(t.id) ? 'background:#f871711a' : ''}">
+      <div><span class="tag">${t.type}</span>${detail}<div class="lbl">${t.date}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
+      <div class="r">${aed(amt)}</div></div>`;
+  });
+  main.innerHTML = h + '</div>';
+  main.querySelectorAll('.px').forEach(i => i.onchange = () => {
+    const v = parseFloat(i.value);
+    if (i.value === '') delete S.prices[i.dataset.sym]; else if (v >= 0) S.prices[i.dataset.sym] = v;
+    save(); render();
+  });
+  main.querySelectorAll('[data-id]').forEach(r => r.onclick = () => openForm(r.dataset.id));
+}
+
+function setType(t) {
+  curType = t;
+  const names = { deposit: 'Deposit', withdraw: 'Withdraw', buy: 'Buy', sell: 'Sell' };
+  $('typeSeg').innerHTML = '';
+  Object.keys(names).forEach(k => { const b = document.createElement('button'); b.type = 'button'; b.textContent = names[k]; b.className = k === t ? 'on' : ''; b.onclick = () => setType(k); $('typeSeg').appendChild(b); });
+  const cash = t === 'deposit' || t === 'withdraw';
+  $('symWrap').style.display = $('qtyWrap').style.display = $('feeWrap').style.display = cash ? 'none' : '';
+  $('pxLbl').textContent = cash ? 'Amount (AED)' : 'Price per unit (AED)';
+}
+function openForm(id) {
+  editId = id || null; $('err').textContent = '';
+  const t = id ? S.txs.find(x => x.id === id) : null;
+  setType(t ? t.type : 'buy');
+  $('fDate').value = t ? t.date : today();
+  $('fSym').value = t ? t.symbol || '' : ''; $('fQty').value = t && t.qty ? t.qty : '';
+  $('fPx').value = t ? t.price : ''; $('fFee').value = t && t.fee ? t.fee : ''; $('fNote').value = t ? t.note || '' : '';
+  $('cancel').textContent = t ? 'Delete' : 'Cancel'; $('cancel').className = 'btn' + (t ? ' del' : '');
+  $('dlg').showModal();
+}
+$('add').onclick = () => openForm();
+$('cancel').onclick = () => {
+  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); save(); render(); }
+  $('dlg').close();
+};
+$('form').onsubmit = e => {
+  e.preventDefault();
+  const cash = curType === 'deposit' || curType === 'withdraw';
+  const price = parseFloat($('fPx').value), qty = parseFloat($('fQty').value), fee = parseFloat($('fFee').value) || 0;
+  const sym = $('fSym').value.trim().toUpperCase();
+  const bad = m => { $('err').textContent = m; };
+  if (!$('fDate').value) return bad('Pick a date.');
+  if (!(price > 0)) return bad(cash ? 'Enter an amount above 0.' : 'Enter a price above 0.');
+  if (!cash && !sym) return bad('Enter a symbol.');
+  if (!cash && !(qty > 0)) return bad('Enter a quantity above 0.');
+  if (fee < 0) return bad('Fee cannot be negative.');
+  const tx = { id: editId || uid(), kid: curKid, type: curType, date: $('fDate').value, price, note: $('fNote').value.trim() };
+  if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; }
+  const prev = S.txs.slice();
+  if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
+  const c = compute(curKid);
+  if (c.issues.has(tx.id) || c.issues.size && !confirm('This leaves some transactions invalid (selling more than held, or cash below zero). Save anyway?')) {
+    if (c.issues.has(tx.id)) { S.txs = prev; return bad(curType === 'sell' ? 'Cannot sell more than held at that date.' : 'Not enough cash at that date — add a deposit first.'); }
+    S.txs = prev; return;
+  }
+  save(); $('dlg').close(); render();
+};
+
+function addKid() {
+  const n = (prompt('Child name?') || '').trim(); if (!n) return;
+  const k = { id: uid(), name: n }; S.kids.push(k); curKid = k.id; save(); render();
+}
+const curName = () => (S.kids.find(k => k.id === curKid) || {}).name;
+$('mClose').onclick = () => $('menu').close();
+$('mAddKid').onclick = () => { $('menu').close(); addKid(); };
+$('mRenKid').onclick = () => { if (!curKid) return; const n = (prompt('New name?', curName()) || '').trim(); if (n) { S.kids.find(k => k.id === curKid).name = n; save(); } $('menu').close(); render(); };
+$('mDelKid').onclick = () => {
+  if (!curKid) return;
+  if (confirm('Delete ' + curName() + ' and ALL their transactions? This cannot be undone. Make a backup first.')) {
+    S.txs = S.txs.filter(t => t.kid !== curKid); S.kids = S.kids.filter(k => k.id !== curKid); curKid = S.kids[0] ? S.kids[0].id : null; save();
+  }
+  $('menu').close(); render();
+};
+function download(name, text, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('mExport').onclick = () => { download('trading-backup-' + today() + '.json', JSON.stringify(S, null, 1), 'application/json'); $('menu').close(); };
+$('mCsv').onclick = () => {
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const rows = [['child', 'date', 'type', 'symbol', 'quantity', 'price_or_amount_AED', 'fee_AED', 'note']];
+  S.txs.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => rows.push([(S.kids.find(k => k.id === t.kid) || {}).name, t.date, t.type, t.symbol, t.qty, t.price, t.fee, t.note]));
+  download('transactions-' + today() + '.csv', rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv'); $('menu').close();
+};
+$('mImport').onclick = () => $('file').click();
+$('file').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
+    if (!confirm('Replace ALL current data with this backup?')) return;
+    S = { kids: d.kids, txs: d.txs, prices: d.prices || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
+  } catch (_) { alert('Not a valid backup file.'); }
+  e.target.value = '';
+};
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+render();
+</script>
+</body>
+</html>
