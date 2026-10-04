@@ -44,6 +44,12 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
 .err{color:var(--down);font-size:13px;margin-top:8px;min-height:1em}
 .tag{font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim);margin-right:6px}
 .px{width:96px;padding:4px 6px;text-align:right}
+#symWrap{position:relative}
+.list{position:absolute;left:0;right:0;top:100%;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;box-shadow:0 6px 18px #0006}
+.list div{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+.list div:last-child{border:0}
+.list .nm{font-size:12px;color:var(--dim)}
+.hint{font-size:12px;color:var(--dim);margin-top:4px;min-height:1em}
 </style>
 </head>
 <body>
@@ -58,9 +64,9 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
   <form id="form" method="dialog">
     <div class="seg" id="typeSeg"></div>
     <label>Date</label><input type="date" id="fDate" required>
-    <div id="symWrap"><label>Symbol / name (e.g. VOO, AAPL, EMAAR)</label><input id="fSym" autocapitalize="characters" autocomplete="off"></div>
+    <div id="symWrap"><label>Symbol — type to search (e.g. VOO, AAPL, EMAAR)</label><input id="fSym" autocapitalize="characters" autocomplete="off"><div class="list" id="symList" hidden></div><div class="hint" id="symHint"></div></div>
     <div id="qtyWrap"><label>Quantity (shares / units)</label><input id="fQty" type="number" step="any" min="0" inputmode="decimal"></div>
-    <label id="pxLbl">Price per unit (AED)</label><input id="fPx" type="number" step="any" min="0" inputmode="decimal">
+    <label id="pxLbl">Price per unit (AED)</label><input id="fPx" type="number" step="any" min="0" inputmode="decimal"><div class="hint" id="pxHint"></div>
     <div id="feeWrap"><label>Fees / commission (AED, optional)</label><input id="fFee" type="number" step="any" min="0" inputmode="decimal"></div>
     <label>Note (optional)</label><input id="fNote">
     <div class="err" id="err"></div>
@@ -73,6 +79,7 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
     <button class="btn" id="mAddKid">Add child</button>
     <button class="btn" id="mRenKid">Rename current child</button>
     <button class="btn del" id="mDelKid">Delete current child &amp; all their data</button>
+    <button class="btn" id="mKey">Price data API key</button>
     <button class="btn" id="mCsv">Export transactions (CSV)</button>
     <button class="btn" id="mExport">Backup (JSON)</button>
     <button class="btn" id="mImport">Restore from backup</button>
@@ -93,8 +100,8 @@ let curKid = S.kids[0] ? S.kids[0].id : null;
 let editId = null, curType = 'buy';
 
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) return s; } catch (e) {}
-  return { kids: [], txs: [], prices: {} };
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; return s; } } catch (e) {}
+  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {} };
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { alert('Could not save: storage unavailable or full.'); } }
 
@@ -162,12 +169,12 @@ function render() {
   if (c.unpriced) h += `<div class="lbl" style="margin-top:8px">⚠ Some holdings have no current price — valued at cost until you enter one.</div>`;
   if (c.issues.size) h += `<div class="lbl down" style="margin-top:8px">⚠ ${c.issues.size} transaction(s) flagged (oversell or negative cash) — check the highlighted rows.</div>`;
 
-  h += '<h2>Holdings</h2><div class="card">';
+  h += '<h2>Holdings <button class="btn" id="refresh" style="float:right;padding:2px 10px;text-transform:none">↻ Refresh prices</button></h2><div class="card">';
   if (!c.holdings.length) h += '<div class="empty">No holdings</div>';
   c.holdings.sort((a, b) => a.sym.localeCompare(b.sym)).forEach(x => {
     h += `<div class="row"><div><b>${esc(x.sym)}</b><div class="lbl">${+x.qty.toFixed(6)} × avg ${aed(x.avg)}</div><div class="lbl">cost ${aed(x.cost)}</div></div>
       <div class="r"><input class="px" data-sym="${esc(x.sym)}" type="number" step="any" inputmode="decimal" placeholder="price now" value="${x.last == null ? '' : x.last}">
-      <div class="lbl">${x.mv == null ? '—' : 'value ' + aed(x.mv)}</div>
+      <div class="lbl">${x.mv == null ? '—' : 'value ' + aed(x.mv)}${S.priceAt[x.sym] ? ' · ' + S.priceAt[x.sym] : ''}</div>
       <div class="${x.upl == null ? '' : cls(x.upl)} sm">${x.upl == null ? '' : signed(x.upl) + ' (' + signed(x.upl / x.cost * 100).replace(/(\.\d)\d*/, '$1') + '%)'}</div></div></div>`;
   });
   h += '</div><h2>Transactions</h2><div class="card">';
@@ -181,9 +188,11 @@ function render() {
       <div class="r">${aed(amt)}</div></div>`;
   });
   main.innerHTML = h + '</div>';
+  const rb = $('refresh'); if (rb) rb.onclick = refreshPrices;
   main.querySelectorAll('.px').forEach(i => i.onchange = () => {
     const v = parseFloat(i.value);
     if (i.value === '') delete S.prices[i.dataset.sym]; else if (v >= 0) S.prices[i.dataset.sym] = v;
+    delete S.priceAt[i.dataset.sym];
     save(); render();
   });
   main.querySelectorAll('[data-id]').forEach(r => r.onclick = () => openForm(r.dataset.id));
@@ -203,6 +212,7 @@ function openForm(id) {
   const t = id ? S.txs.find(x => x.id === id) : null;
   setType(t ? t.type : 'buy');
   $('fDate').value = t ? t.date : today();
+  pick = t && t.symbol && S.meta[t.symbol] ? Object.assign({ symbol: t.symbol }, S.meta[t.symbol]) : null; pxManual = !!t; $('symList').hidden = true; $('symHint').textContent = ''; $('pxHint').textContent = '';
   $('fSym').value = t ? t.symbol || '' : ''; $('fQty').value = t && t.qty ? t.qty : '';
   $('fPx').value = t ? t.price : ''; $('fFee').value = t && t.fee ? t.fee : ''; $('fNote').value = t ? t.note || '' : '';
   $('cancel').textContent = t ? 'Delete' : 'Cancel'; $('cancel').className = 'btn' + (t ? ' del' : '');
@@ -225,7 +235,7 @@ $('form').onsubmit = e => {
   if (!cash && !(qty > 0)) return bad('Enter a quantity above 0.');
   if (fee < 0) return bad('Fee cannot be negative.');
   const tx = { id: editId || uid(), kid: curKid, type: curType, date: $('fDate').value, price, note: $('fNote').value.trim() };
-  if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; }
+  if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; if (pick && pick.symbol === sym) S.meta[sym] = { mic: pick.mic, cur: pick.cur, name: pick.name }; }
   const prev = S.txs.slice();
   if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
   const c = compute(curKid);
@@ -234,6 +244,130 @@ $('form').onsubmit = e => {
     S.txs = prev; return;
   }
   save(); $('dlg').close(); render();
+};
+
+// ---- Price data (Twelve Data). The user's own free API key lives in localStorage only, never in backups. ----
+const KEYK = 'kidsTrading.apikey';
+const getKey = () => { try { return localStorage.getItem(KEYK) || ''; } catch (e) { return ''; } };
+let pick = null, pxManual = false, searchTok = 0, priceTok = 0, searchTimer = null, dateTimer = null;
+
+async function td(path, params) {
+  const key = getKey(); if (!key) throw new Error('No API key set (⋯ menu → Price data API key)');
+  const u = new URL('https://api.twelvedata.com/' + path);
+  Object.entries(params).forEach(([k, v]) => { if (v != null) u.searchParams.set(k, v); });
+  const r = await fetch(u, { headers: { Authorization: 'apikey ' + key } });
+  const j = await r.json();
+  if (j.status === 'error' || j.code >= 400) throw new Error(j.message || 'Price service error');
+  return j;
+}
+const nextDay = d => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+// Latest price when date is today, otherwise that day's close (end_date is exclusive in the API).
+async function quote(symbol, mic, date) {
+  if (!date || date === today()) { const j = await td('price', { symbol, mic_code: mic }); return parseFloat(j.price); }
+  const j = await td('time_series', { symbol, mic_code: mic, interval: '1day', start_date: date, end_date: nextDay(date), outputsize: 1 });
+  if (!j.values || !j.values.length) throw new Error('No close for ' + date + ' (market closed?)');
+  return parseFloat(j.values[0].close);
+}
+async function toAed(symbol, mic, cur, date) {
+  const px = await quote(symbol, mic, date);
+  if (!(px > 0)) throw new Error('Bad price returned');
+  const rate = cur === 'AED' || !cur ? 1 : await quote(cur + '/AED', null, date);
+  if (!(rate > 0)) throw new Error('Bad FX rate returned');
+  return { aed: px * rate, px, rate, cur: cur || 'AED' };
+}
+
+async function autofill() {
+  if (!pick || curType === 'deposit' || curType === 'withdraw' || pxManual) return;
+  const tok = ++priceTok, date = $('fDate').value;
+  if (!getKey()) { $('pxHint').textContent = 'Add an API key (⋯ menu) to auto-fill prices.'; return; }
+  if (!date) return;
+  $('pxHint').textContent = 'Fetching price…';
+  try {
+    const r = await toAed(pick.symbol, pick.mic, pick.cur, date);
+    if (tok !== priceTok || pxManual) return;
+    $('fPx').value = +r.aed.toFixed(4);
+    const when = date === today() ? 'latest quote' : 'close on ' + date;
+    $('pxHint').textContent = (r.cur === 'AED' ? `${r.cur} ${r.px}` : `${r.cur} ${r.px} × ${+r.rate.toFixed(4)}`) + ` · ${when}. Edit if your actual fill price differed.`;
+  } catch (e) { if (tok === priceTok) $('pxHint').textContent = 'Could not fetch price: ' + e.message + ' — enter it manually.'; }
+}
+
+function showList(items) {
+  const l = $('symList'); l.innerHTML = '';
+  if (!items.length) { l.hidden = true; return; }
+  items.forEach(it => {
+    const d = document.createElement('div');
+    d.innerHTML = `<b>${esc(it.symbol)}</b> <span class="nm">${esc(it.name || '')}</span><div class="nm">${esc(it.exch || '')}${it.cur ? ' · ' + esc(it.cur) : ''}${it.local ? ' · yours' : ''}</div>`;
+    d.onmousedown = e => { e.preventDefault(); choose(it); };
+    d.ontouchstart = e => { e.preventDefault(); choose(it); };
+    l.appendChild(d);
+  });
+  l.hidden = false;
+}
+function choose(it) {
+  pick = { symbol: it.symbol, mic: it.mic, cur: it.cur, name: it.name };
+  $('fSym').value = it.symbol; $('symList').hidden = true;
+  $('symHint').textContent = [it.name, it.exch, it.cur].filter(Boolean).join(' · ');
+  pxManual = false; autofill();
+}
+function localMatches(q) {
+  const held = new Set(S.txs.map(t => t.symbol).filter(Boolean)); Object.keys(S.meta).forEach(k => held.add(k));
+  return [...held].filter(sy => !q || sy.includes(q)).sort().slice(0, 6).map(sy => {
+    const m = S.meta[sy] || {}; return { symbol: sy, name: m.name, mic: m.mic, cur: m.cur, exch: m.mic, local: true };
+  });
+}
+$('fSym').oninput = () => {
+  const q = $('fSym').value.trim().toUpperCase(); pick = null; $('symHint').textContent = '';
+  clearTimeout(searchTimer);
+  const loc = localMatches(q); showList(loc);
+  if (q.length < 1 || !getKey()) return;
+  const tok = ++searchTok;
+  searchTimer = setTimeout(async () => {
+    try {
+      const j = await td('symbol_search', { symbol: q, outputsize: 30 });
+      if (tok !== searchTok) return;
+      const seen = new Set(loc.map(l => l.symbol + '|' + l.mic));
+      const rank = r => (r.currency === 'USD' || r.currency === 'AED' ? 0 : 1);
+      const api = (j.data || []).filter(r => r.mic_code !== 'IEXG')
+        .sort((a, b) => rank(a) - rank(b))
+        .map(r => ({ symbol: r.symbol, name: r.instrument_name, mic: r.mic_code, cur: r.currency, exch: r.exchange }))
+        .filter(r => !seen.has(r.symbol + '|' + r.mic)).slice(0, 12);
+      showList(loc.concat(api));
+    } catch (e) { if (tok === searchTok) $('symHint').textContent = e.message; }
+  }, 350);
+};
+$('fSym').onfocus = () => { if (!$('fSym').value) showList(localMatches('')); };
+$('fSym').onblur = () => setTimeout(() => { $('symList').hidden = true; }, 150);
+$('fPx').oninput = () => { pxManual = true; $('pxHint').textContent = 'Manual price.'; };
+$('fDate').onchange = () => { clearTimeout(dateTimer); dateTimer = setTimeout(() => { pxManual = false; autofill(); }, 400); };
+
+async function refreshPrices() {
+  const c = compute(curKid), btn = $('refresh');
+  const targets = c.holdings.filter(h => S.meta[h.sym]);
+  const skipped = c.holdings.length - targets.length;
+  if (!getKey()) return alert('Add your price data API key first (⋯ menu).');
+  if (!targets.length) return alert('No holdings with a linked symbol. Pick the symbol from the search list when adding a trade.');
+  btn.disabled = true; const errs = [];
+  const fxCache = {};
+  const hhmm = () => new Date().toTimeString().slice(0, 5);
+  for (const h of targets) {
+    btn.textContent = '… ' + h.sym;
+    const m = S.meta[h.sym];
+    try {
+      const px = await quote(h.sym, m.mic);
+      let rate = 1;
+      if (m.cur && m.cur !== 'AED') rate = fxCache[m.cur] || (fxCache[m.cur] = await quote(m.cur + '/AED', null));
+      S.prices[h.sym] = +(px * rate).toFixed(4); S.priceAt[h.sym] = today().slice(5) + ' ' + hhmm();
+    } catch (e) { errs.push(h.sym + ': ' + e.message); }
+  }
+  save(); render();
+  const note = errs.concat(skipped ? [skipped + ' holding(s) without a linked symbol were not refreshed.'] : []);
+  if (note.length) alert(note.join('\n'));
+}
+$('mKey').onclick = () => {
+  const k = prompt('Paste your Twelve Data API key (free at twelvedata.com). Leave empty to remove it. It is stored only on this device.', getKey());
+  if (k === null) return;
+  try { if (k.trim()) localStorage.setItem(KEYK, k.trim()); else localStorage.removeItem(KEYK); } catch (e) { alert('Could not store key.'); }
+  $('menu').close();
 };
 
 function addKid() {
@@ -268,7 +402,7 @@ $('file').onchange = async e => {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
     if (!confirm('Replace ALL current data with this backup?')) return;
-    S = { kids: d.kids, txs: d.txs, prices: d.prices || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
+    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
   } catch (_) { alert('Not a valid backup file.'); }
   e.target.value = '';
 };
