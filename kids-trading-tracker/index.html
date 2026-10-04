@@ -38,6 +38,7 @@ dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);co
 dialog::backdrop{background:#0008}
 #uMsg{white-space:pre-wrap;margin-bottom:6px}
 label{display:block;margin:10px 0 2px;color:var(--dim);font-size:13px}
+input[type="date"]{display:block;min-width:0;max-width:100%;min-height:42px;-webkit-appearance:none;appearance:none;text-align:left}
 input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
 .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 .seg button{padding:8px 0;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
@@ -174,7 +175,8 @@ function load() {
     return s; } } catch (e) {}
   return { v: 2, kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {}, dirty: {}, fx: {}, fxAt: {} };
 }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { ui.notice('Could not save: storage is unavailable or full. Use ⋯ → Backup to keep a copy.'); } }
+let saveWarned = false;
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { if (!saveWarned) { saveWarned = true; ui.notice('This device is not keeping your data between visits (storage is unavailable or full). Use ⋯ → Backup to keep a copy.'); } } }
 
 const aed = n => (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const signed = n => (n > 0 ? '+' : '') + aed(n);
