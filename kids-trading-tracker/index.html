@@ -76,9 +76,12 @@ window.addEventListener('error', function (e) {
     <label>Date</label><input type="date" id="fDate" required>
     <div id="symWrap"><label>Symbol — type to search (e.g. VOO, AAPL, EMAAR)</label><input id="fSym" autocapitalize="characters" autocomplete="off"><div class="list" id="symList" hidden></div><div class="hint" id="symHint"></div></div>
     <div id="qtyWrap"><label>Quantity (shares / units)</label><input id="fQty" type="number" step="any" min="0" inputmode="decimal"></div>
-    <label id="pxLbl">Price per unit (AED)</label><input id="fPx" type="number" step="any" min="0" inputmode="decimal"><div class="hint" id="pxHint"></div>
+    <div id="curWrap"><label>Currency of the share price</label><select id="fCur"><option value="USD">USD (US dollar)</option><option value="AED">AED (dirham)</option></select></div>
+    <label id="pxLbl">Price per share</label><input id="fPx" type="number" step="any" min="0" inputmode="decimal"><div class="hint" id="pxHint"></div>
+    <div id="fxWrap"><label id="fxLbl">Exchange rate: AED per 1 USD</label><input id="fFx" type="number" step="any" min="0" inputmode="decimal"><div class="hint" id="fxHint"></div></div>
     <div id="feeWrap"><label>Fees / commission (AED, optional)</label><input id="fFee" type="number" step="any" min="0" inputmode="decimal"></div>
     <label>Note (optional)</label><input id="fNote">
+    <div class="hint" id="totHint" style="font-weight:600;color:var(--text)"></div>
     <div class="err" id="err"></div>
     <div class="acts"><button type="button" class="btn" id="cancel">Cancel</button><button type="submit" class="btn pri">Save</button></div>
   </form>
@@ -121,6 +124,11 @@ window.addEventListener('error', function (e) {
 'use strict';
 const KEY = 'kidsTrading.v1';
 const $ = id => document.getElementById(id);
+// Cash is always AED. A trade can be priced in another currency (e.g. USD); it stores that price plus the AED-per-unit rate used.
+const FX_PEG = { USD: 3.6725 };   // UAE dirham peg (fixed since 1997); only a fallback when no rate was entered or fetched
+const txCur = t => t.cur || 'AED';
+const txFx = t => (t.fx > 0 ? t.fx : 1);
+const fxNow = cur => cur === 'AED' ? 1 : (S.fx[cur] > 0 ? S.fx[cur] : FX_PEG[cur]);
 const TYPE_LABEL = { buy: 'Buy', sell: 'Sell', deposit: 'Add money', withdraw: 'Take out' };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
@@ -161,8 +169,10 @@ let curKid = S.kids[0] ? S.kids[0].id : null;
 let editId = null, curType = 'buy';
 
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; s.dirty = s.dirty || {}; return s; } } catch (e) {}
-  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {}, dirty: {} };
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; s.dirty = s.dirty || {}; s.fx = s.fx || {}; s.fxAt = s.fxAt || {};
+    if (!s.v) { Object.keys(s.prices || {}).forEach(sy => { const m = s.meta[sy]; if (m && m.cur && m.cur !== 'AED') delete s.prices[sy]; }); s.v = 2; }   // v1 stored converted AED prices
+    return s; } } catch (e) {}
+  return { v: 2, kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {}, dirty: {}, fx: {}, fxAt: {} };
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { ui.notice('Could not save: storage is unavailable or full. Use ⋯ → Backup to keep a copy.'); } }
 
@@ -182,22 +192,24 @@ function compute(kidId) {
     if (t.type === 'deposit') { cash += t.price; deposited += t.price; }
     else if (t.type === 'withdraw') { cash -= t.price; withdrawn += t.price; }
     else if (t.type === 'buy') {
-      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0 });
-      p.qty += t.qty; p.cost += t.qty * t.price + fee; cash -= t.qty * t.price + fee; fees += fee;
+      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0, nat: 0, cur: 'AED' });
+      const aedPx = t.qty * t.price * txFx(t);
+      p.cur = txCur(t); p.qty += t.qty; p.cost += aedPx + fee; p.nat += t.qty * t.price; cash -= aedPx + fee; fees += fee;
     } else if (t.type === 'sell') {
-      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0 });
+      const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0, nat: 0, cur: 'AED' });
       if (t.qty > p.qty + 1e-9) { issues.push(t.id); why[t.id] = 'oversell'; continue; }
-      const avg = p.cost / p.qty, costOut = avg * t.qty;
-      realized += t.qty * t.price - fee - costOut; fees += fee;
-      cash += t.qty * t.price - fee; p.qty -= t.qty; p.cost -= costOut;
-      if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; }
+      const aedPx = t.qty * t.price * txFx(t);
+      const avg = p.cost / p.qty, costOut = avg * t.qty, natOut = p.nat / p.qty * t.qty;
+      realized += aedPx - fee - costOut; fees += fee;
+      cash += aedPx - fee; p.qty -= t.qty; p.cost -= costOut; p.nat -= natOut;
+      if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; p.nat = 0; }
     }
     if (cash < -0.005) { issues.push(t.id); why[t.id] = why[t.id] || 'cash'; }
   }
   const holdings = Object.entries(pos).filter(([, p]) => p.qty > 0).map(([sym, p]) => {
-    const last = S.prices[sym];
-    const mv = last == null ? null : p.qty * last;
-    return { sym, qty: p.qty, cost: p.cost, avg: p.cost / p.qty, last, mv, upl: mv == null ? null : mv - p.cost };
+    const last = S.prices[sym], rate = fxNow(p.cur);
+    const mv = last == null || !(rate > 0) ? null : p.qty * last * rate;
+    return { sym, cur: p.cur, rate, qty: p.qty, cost: p.cost, avg: p.cost / p.qty, avgNat: p.nat / p.qty, last, mv, upl: mv == null ? null : mv - p.cost };
   });
   const mvTotal = holdings.reduce((a, h) => a + (h.mv == null ? h.cost : h.mv), 0);
   const unpriced = holdings.some(h => h.mv == null);
@@ -236,18 +248,25 @@ function render() {
 
   h += '<h2>Holdings <button class="btn" id="refresh" style="float:right;padding:2px 10px;text-transform:none">↻ Refresh prices</button></h2><div class="card">';
   if (!c.holdings.length) h += '<div class="empty">No holdings</div>';
+  const curs = [...new Set(c.holdings.map(x => x.cur).filter(k => k !== 'AED'))];
+  curs.forEach(k => {
+    const live = S.fx[k] > 0;
+    h += `<div class="row" style="align-items:center"><div class="lbl">Exchange rate<br>${live ? (S.fxAt[k] ? 'updated ' + esc(S.fxAt[k]) : 'entered by you') : 'UAE peg (default)'}</div><div class="r">1 ${esc(k)} = <input class="px fxnow" data-cur="${esc(k)}" type="number" step="any" inputmode="decimal" value="${fxNow(k) || ''}" style="width:90px"> AED</div></div>`;
+  });
   c.holdings.sort((a, b) => a.sym.localeCompare(b.sym)).forEach(x => {
-    h += `<div class="row"><div><b>${esc(x.sym)}</b><div class="lbl">${+x.qty.toFixed(6)} × avg ${aed(x.avg)}</div><div class="lbl">cost ${aed(x.cost)}</div></div>
-      <div class="r"><input class="px" data-sym="${esc(x.sym)}" type="number" step="any" inputmode="decimal" placeholder="price now" value="${x.last == null ? '' : x.last}">
-      <div class="lbl">${x.mv == null ? '—' : 'value ' + aed(x.mv)}${S.priceAt[x.sym] ? ' · ' + S.priceAt[x.sym] : ''}</div>
+    const nat = x.cur !== 'AED';
+    h += `<div class="row"><div><b>${esc(x.sym)}</b>${nat ? ' <span class="tag">' + esc(x.cur) + '</span>' : ''}<div class="lbl">${+x.qty.toFixed(6)} × avg ${nat ? esc(x.cur) + ' ' + aed(x.avgNat) : aed(x.avg)}</div><div class="lbl">cost AED ${aed(x.cost)}</div></div>
+      <div class="r"><input class="px" data-sym="${esc(x.sym)}" type="number" step="any" inputmode="decimal" placeholder="price now (${esc(x.cur)})" value="${x.last == null ? '' : x.last}">
+      <div class="lbl">${x.mv == null ? '—' : 'value AED ' + aed(x.mv)}${S.priceAt[x.sym] ? ' · ' + S.priceAt[x.sym] : ''}</div>
       <div class="${x.upl == null ? '' : cls(x.upl)} sm">${x.upl == null ? '' : signed(x.upl) + ' (' + signed(x.upl / x.cost * 100).replace(/(\.\d)\d*/, '$1') + '%)'}</div></div></div>`;
   });
   h += '</div><h2>Transactions</h2><div class="card">';
   const list = S.txs.filter(t => t.kid === curKid).sort((a, b) => b.date.localeCompare(a.date));
   if (!list.length) h += '<div class="empty">Nothing yet — tap + Add</div>';
   list.forEach(t => {
-    const amt = t.type === 'deposit' || t.type === 'withdraw' ? t.price : t.qty * t.price;
-    const detail = t.type === 'deposit' || t.type === 'withdraw' ? '' : `${esc(t.symbol)} · ${+t.qty} @ ${aed(t.price)}${t.fee ? ' · fee ' + aed(t.fee) : ''}`;
+    const isCash = t.type === 'deposit' || t.type === 'withdraw', nat = txCur(t) !== 'AED';
+    const amt = isCash ? t.price : t.qty * t.price * txFx(t);
+    const detail = isCash ? '' : `${esc(t.symbol)} · ${+t.qty} @ ${nat ? esc(txCur(t)) + ' ' + aed(t.price) + ' × ' + +txFx(t).toFixed(4) : aed(t.price)}${t.fee ? ' · fee ' + aed(t.fee) : ''}`;
     h += `<div class="row" data-id="${t.id}" style="cursor:pointer;${c.issues.has(t.id) ? 'background:var(--flag)' : ''}">
       <div><span class="tag">${TYPE_LABEL[t.type] || t.type}</span>${detail}<div class="lbl">${t.date}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
       <div class="r">${aed(amt)}</div></div>`;
@@ -258,11 +277,16 @@ function render() {
   const rb = $('refresh'); if (rb) rb.onclick = refreshPrices;
   $('sendMom').onclick = shareCurrent; $('mergeLink').onclick = () => $('mMerge').onclick();
   const tip = $('tipX'); if (tip) tip.onclick = () => { try { localStorage.setItem('kidsTrading.tip', '1'); } catch (e) {} render(); };
-  main.querySelectorAll('.px').forEach(i => i.onchange = () => {
+  main.querySelectorAll('.px[data-sym]').forEach(i => i.onchange = () => {
     const v = parseFloat(i.value);
     if (i.value === '') delete S.prices[i.dataset.sym]; else if (v >= 0) S.prices[i.dataset.sym] = v;
     delete S.priceAt[i.dataset.sym];
     save(); render();
+  });
+  main.querySelectorAll('.fxnow').forEach(i => i.onchange = () => {
+    const v = parseFloat(i.value);
+    if (i.value === '') delete S.fx[i.dataset.cur]; else if (v > 0) S.fx[i.dataset.cur] = v;
+    delete S.fxAt[i.dataset.cur]; save(); render();
   });
   main.querySelectorAll('[data-id]').forEach(r => r.onclick = () => openForm(r.dataset.id));
 }
@@ -275,19 +299,19 @@ function cashInfo(txs, tx) {
     if (t.date > tx.date) { if (t.type === 'deposit') later++; continue; }
     const fee = t.fee || 0;
     if (t.type === 'deposit') avail += t.price; else if (t.type === 'withdraw') avail -= t.price;
-    else if (t.type === 'buy') avail -= t.qty * t.price + fee; else if (t.type === 'sell') avail += t.qty * t.price - fee;
+    else if (t.type === 'buy') avail -= t.qty * t.price * txFx(t) + fee; else if (t.type === 'sell') avail += t.qty * t.price * txFx(t) - fee;
   }
-  const need = tx.type === 'withdraw' ? tx.price : tx.qty * tx.price + (tx.fee || 0);
+  const need = tx.type === 'withdraw' ? tx.price : tx.qty * tx.price * txFx(tx) + (tx.fee || 0);
   return { avail, need, later };
 }
 function loadExample() {
   const k = { id: uid(), name: 'Example' }; S.kids.push(k); curKid = k.id;
-  const add = (type, date, symbol, qty, price, fee) => S.txs.push(Object.assign({ id: uid(), upd: Date.now(), kid: k.id, type, date, price, note: 'example' }, symbol ? { symbol, qty, fee: fee || 0 } : {}));
-  add('deposit', '2026-08-01', null, 0, 6000);
-  add('buy', '2026-08-03', 'VOO', 2, 1840, 5);
-  add('buy', '2026-08-20', 'AAPL', 5, 220, 3);
-  add('sell', '2026-09-15', 'AAPL', 2, 245, 3);
-  S.prices.VOO = 1885; S.prices.AAPL = 238;
+  const add = (type, date, symbol, qty, price, fee, cur, fx) => S.txs.push(Object.assign({ id: uid(), upd: Date.now(), kid: k.id, type, date, price, note: 'example' }, symbol ? { symbol, qty, fee: fee || 0, cur, fx } : {}));
+  add('deposit', '2026-08-01', null, 0, 12000);                       // AED handed to Mom
+  add('buy', '2026-08-03', 'VOO', 2, 520, 5, 'USD', 3.6725);          // USD price, converted to AED
+  add('buy', '2026-08-20', 'AAPL', 5, 220, 3, 'USD', 3.6725);
+  add('sell', '2026-09-15', 'AAPL', 2, 245, 3, 'USD', 3.6725);
+  S.prices.VOO = 525; S.prices.AAPL = 238; S.fx.USD = 3.6725;
   save(); render();
 }
 function setType(t) {
@@ -297,16 +321,44 @@ function setType(t) {
   Object.keys(names).forEach(k => { const b = document.createElement('button'); b.type = 'button'; b.textContent = names[k]; b.className = k === t ? 'on' : ''; b.onclick = () => setType(k); $('typeSeg').appendChild(b); });
   const cash = t === 'deposit' || t === 'withdraw';
   $('symWrap').style.display = $('qtyWrap').style.display = $('feeWrap').style.display = cash ? 'none' : '';
-  $('pxLbl').textContent = cash ? (t === 'deposit' ? 'How much money did you give Mom? (AED)' : 'How much did you take out? (AED)') : 'Price per share (AED)';
+  updateCur();
+}
+function ensureCurOption(c) { const sel = $('fCur'); if (![...sel.options].some(o => o.value === c)) { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); } }
+function updateCur() {
+  const cash = curType === 'deposit' || curType === 'withdraw', cur = $('fCur').value;
+  $('curWrap').hidden = cash; $('fxWrap').hidden = cash || cur === 'AED';
+  $('pxLbl').textContent = cash ? (curType === 'deposit' ? 'How much money did you give Mom? (AED)' : 'How much did you take out? (AED)') : 'Price per share (' + cur + ')';
+  $('fxLbl').textContent = 'Exchange rate: AED per 1 ' + cur;
+  updateTotal();
+}
+// What Mom's AED really pays/receives: shares × price × rate (+/− fee). Shown live so mistakes are obvious.
+function updateTotal() {
+  const el = $('totHint'); if (curType === 'deposit' || curType === 'withdraw') { el.textContent = ''; return; }
+  const cur = $('fCur').value, q = parseFloat($('fQty').value), px = parseFloat($('fPx').value), fee = parseFloat($('fFee').value) || 0;
+  const fx = cur === 'AED' ? 1 : parseFloat($('fFx').value);
+  if (!(q > 0 && px > 0 && fx > 0)) { el.textContent = ''; return; }
+  const gross = q * px * fx, buy = curType === 'buy';
+  el.textContent = (buy ? 'You pay ' : 'You receive ') + 'AED ' + aed(buy ? gross + fee : gross - fee) + (cur !== 'AED' ? ` (${cur} ${aed(q * px)} × ${+fx.toFixed(4)}` + (fee ? ' + fee' : '') + ')' : '');
+}
+// Fill the rate from the last saved one, else the UAE peg, until a live rate arrives or the user types their own.
+function prefillFx() {
+  const cur = $('fCur').value; if (cur === 'AED' || fxManual) return;
+  const have = S.fx[cur] > 0 ? S.fx[cur] : FX_PEG[cur];
+  $('fFx').value = have || '';
+  $('fxHint').textContent = have ? (S.fx[cur] > 0 ? 'Last saved rate.' : 'UAE dirham peg.') + ' Change it to the rate your broker or Mom actually got.' : 'Enter the rate used.';
+  updateTotal();
 }
 function openForm(id) {
   editId = id || null; $('err').textContent = '';
   const t = id ? S.txs.find(x => x.id === id) : null;
   setType(t ? t.type : 'buy');
   $('fDate').value = t ? t.date : today();
-  pick = t && t.symbol && S.meta[t.symbol] ? Object.assign({ symbol: t.symbol }, S.meta[t.symbol]) : null; pxManual = !!t; $('symList').hidden = true; $('symHint').textContent = ''; $('pxHint').textContent = '';
+  pick = t && t.symbol && S.meta[t.symbol] ? Object.assign({ symbol: t.symbol }, S.meta[t.symbol]) : null; pxManual = !!t; fxManual = !!t; $('symList').hidden = true; $('symHint').textContent = ''; $('pxHint').textContent = '';
   $('fSym').value = t ? t.symbol || '' : ''; $('fQty').value = t && t.qty ? t.qty : '';
+  { const c0 = t ? txCur(t) : (S.lastCur || 'USD'); ensureCurOption(c0); $('fCur').value = c0; }
+  $('fFx').value = t && txCur(t) !== 'AED' ? txFx(t) : ''; $('fxHint').textContent = '';
   $('fPx').value = t ? t.price : ''; $('fFee').value = t && t.fee ? t.fee : ''; $('fNote').value = t ? t.note || '' : '';
+  updateCur(); prefillFx();
   $('cancel').textContent = t ? 'Delete' : 'Cancel'; $('cancel').className = 'btn' + (t ? ' del' : '');
   $('dlg').showModal();
 }
@@ -319,6 +371,7 @@ $('form').onsubmit = async e => {
   e.preventDefault();
   const cash = curType === 'deposit' || curType === 'withdraw';
   const price = parseFloat($('fPx').value), qty = parseFloat($('fQty').value), fee = parseFloat($('fFee').value) || 0;
+  const cur = $('fCur').value, fx = parseFloat($('fFx').value);
   const sym = $('fSym').value.trim().toUpperCase();
   const bad = m => { $('err').textContent = m; };
   if (!$('fDate').value) return bad('Pick a date.');
@@ -326,8 +379,9 @@ $('form').onsubmit = async e => {
   if (!cash && !sym) return bad('Enter a symbol.');
   if (!cash && !(qty > 0)) return bad('Enter a quantity above 0.');
   if (fee < 0) return bad('Fee cannot be negative.');
+  if (!cash && cur !== 'AED' && !(fx > 0)) return bad('Enter the exchange rate (AED per 1 ' + cur + ').');
   const tx = { id: editId || uid(), upd: Date.now(), kid: curKid, type: curType, date: $('fDate').value, price, note: $('fNote').value.trim() };
-  if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; if (pick && pick.symbol === sym) S.meta[sym] = { mic: pick.mic, cur: pick.cur, name: pick.name }; }
+  if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; tx.cur = cur; tx.fx = cur === 'AED' ? 1 : fx; if (pick && pick.symbol === sym) S.meta[sym] = { mic: pick.mic, cur: pick.cur, name: pick.name }; }
   const prev = S.txs.slice();
   if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
   const c = compute(curKid);
@@ -340,13 +394,14 @@ $('form').onsubmit = async e => {
     ok = await ui.confirm('This leaves some other transactions invalid (selling more than held, or cash below zero). Save anyway?', 'Save anyway');
   }
   if (!ok) { S.txs = prev; return; }
+  if (!cash) { S.lastCur = cur; if (cur !== 'AED' && !(S.fx[cur] > 0)) S.fx[cur] = fx; }
   S.dirty[curKid] = true; save(); $('dlg').close(); render();
 };
 
 // ---- Price data (Twelve Data). The user's own free API key lives in localStorage only, never in backups. ----
 const KEYK = 'kidsTrading.apikey';
 const getKey = () => { try { return localStorage.getItem(KEYK) || ''; } catch (e) { return ''; } };
-let pick = null, pxManual = false, searchTok = 0, priceTok = 0, searchTimer = null, dateTimer = null;
+let pick = null, pxManual = false, fxManual = false, searchTok = 0, priceTok = 0, searchTimer = null, dateTimer = null;
 
 async function td(path, params) {
   const key = getKey(); if (!key) throw new Error('No API key set (⋯ menu → Price data API key)');
@@ -365,27 +420,28 @@ async function quote(symbol, mic, date) {
   if (!j.values || !j.values.length) throw new Error('No close for ' + date + ' (market closed?)');
   return parseFloat(j.values[0].close);
 }
-async function toAed(symbol, mic, cur, date) {
-  const px = await quote(symbol, mic, date);
-  if (!(px > 0)) throw new Error('Bad price returned');
-  const rate = cur === 'AED' || !cur ? 1 : await quote(cur + '/AED', null, date);
-  if (!(rate > 0)) throw new Error('Bad FX rate returned');
-  return { aed: px * rate, px, rate, cur: cur || 'AED' };
-}
-
 async function autofill() {
-  if (!pick || curType === 'deposit' || curType === 'withdraw' || pxManual) return;
-  const tok = ++priceTok, date = $('fDate').value;
+  if (curType === 'deposit' || curType === 'withdraw') return;
+  const cur = $('fCur').value, date = $('fDate').value;
+  prefillFx();
+  if (!pick || !date) return;
   if (!getKey()) { $('pxHint').textContent = 'Add an API key (⋯ menu) to auto-fill prices.'; return; }
-  if (!date) return;
-  $('pxHint').textContent = 'Fetching price…';
-  try {
-    const r = await toAed(pick.symbol, pick.mic, pick.cur, date);
-    if (tok !== priceTok || pxManual) return;
-    $('fPx').value = +r.aed.toFixed(4);
-    const when = date === today() ? 'latest quote' : 'close on ' + date;
-    $('pxHint').textContent = (r.cur === 'AED' ? `${r.cur} ${r.px}` : `${r.cur} ${r.px} × ${+r.rate.toFixed(4)}`) + ` · ${when}. Edit if your actual fill price differed.`;
-  } catch (e) { if (tok === priceTok) $('pxHint').textContent = 'Could not fetch price: ' + e.message + ' — enter it manually.'; }
+  const tok = ++priceTok, when = date === today() ? 'latest quote' : 'close on ' + date;
+  if (!pxManual) {
+    $('pxHint').textContent = 'Fetching price…';
+    try {
+      const px = await quote(pick.symbol, pick.mic, date);
+      if (!(px > 0)) throw new Error('Bad price returned');
+      if (tok === priceTok && !pxManual) { $('fPx').value = px; $('pxHint').textContent = `${cur} ${px} · ${when}. Edit if your actual fill price differed.`; updateTotal(); }
+    } catch (e) { if (tok === priceTok) $('pxHint').textContent = 'Could not fetch price: ' + e.message + ' — enter it manually.'; }
+  }
+  if (cur !== 'AED' && !fxManual) {
+    try {
+      const r = await quote(cur + '/AED', null, date);
+      if (!(r > 0)) throw new Error('Bad rate returned');
+      if (tok === priceTok && !fxManual) { $('fFx').value = +r.toFixed(5); $('fxHint').textContent = `Market rate · ${when}. Change it to the rate Mom actually got.`; updateTotal(); }
+    } catch (e) { /* keeps the saved/peg rate already filled in */ }
+  }
 }
 
 function showList(items) {
@@ -403,8 +459,9 @@ function showList(items) {
 function choose(it) {
   pick = { symbol: it.symbol, mic: it.mic, cur: it.cur, name: it.name };
   $('fSym').value = it.symbol; $('symList').hidden = true;
+  if (it.cur) { ensureCurOption(it.cur); $('fCur').value = it.cur; updateCur(); }
   $('symHint').textContent = [it.name, it.exch, it.cur].filter(Boolean).join(' · ');
-  pxManual = false; autofill();
+  pxManual = false; fxManual = false; autofill();
 }
 function localMatches(q) {
   const held = new Set(S.txs.map(t => t.symbol).filter(Boolean)); Object.keys(S.meta).forEach(k => held.add(k));
@@ -434,8 +491,11 @@ $('fSym').oninput = () => {
 };
 $('fSym').onfocus = () => { if (!$('fSym').value) showList(localMatches('')); };
 $('fSym').onblur = () => setTimeout(() => { $('symList').hidden = true; }, 150);
-$('fPx').oninput = () => { pxManual = true; $('pxHint').textContent = 'Manual price.'; };
-$('fDate').onchange = () => { clearTimeout(dateTimer); dateTimer = setTimeout(() => { pxManual = false; autofill(); }, 400); };
+$('fPx').oninput = () => { pxManual = true; $('pxHint').textContent = 'Manual price.'; updateTotal(); };
+$('fFx').oninput = () => { fxManual = true; $('fxHint').textContent = 'Manual rate.'; updateTotal(); };
+$('fQty').oninput = updateTotal; $('fFee').oninput = updateTotal;
+$('fCur').onchange = () => { fxManual = false; updateCur(); prefillFx(); autofill(); };
+$('fDate').onchange = () => { clearTimeout(dateTimer); dateTimer = setTimeout(() => { pxManual = false; fxManual = false; autofill(); }, 400); };
 
 async function refreshPrices() {
   const c = compute(curKid), btn = $('refresh');
@@ -444,16 +504,14 @@ async function refreshPrices() {
   if (!getKey()) return ui.notice('Add your price data API key first (⋯ menu).');
   if (!targets.length) return ui.notice('No holdings with a linked symbol. Pick the symbol from the search list when adding a trade.');
   btn.disabled = true; const errs = [];
-  const fxCache = {};
-  const hhmm = () => new Date().toTimeString().slice(0, 5);
+  const fxDone = {};
+  const stamp = () => today().slice(5) + ' ' + new Date().toTimeString().slice(0, 5);
   for (const h of targets) {
     btn.textContent = '… ' + h.sym;
     const m = S.meta[h.sym];
     try {
-      const px = await quote(h.sym, m.mic);
-      let rate = 1;
-      if (m.cur && m.cur !== 'AED') rate = fxCache[m.cur] || (fxCache[m.cur] = await quote(m.cur + '/AED', null));
-      S.prices[h.sym] = +(px * rate).toFixed(4); S.priceAt[h.sym] = today().slice(5) + ' ' + hhmm();
+      S.prices[h.sym] = await quote(h.sym, m.mic); S.priceAt[h.sym] = stamp();
+      if (h.cur !== 'AED' && !fxDone[h.cur]) { S.fx[h.cur] = +(await quote(h.cur + '/AED', null)).toFixed(5); S.fxAt[h.cur] = stamp(); fxDone[h.cur] = true; }
     } catch (e) { errs.push(h.sym + ': ' + e.message); }
   }
   save(); render();
@@ -561,8 +619,8 @@ function download(name, text, type) {
 $('mExport').onclick = () => { $('menu').close(); showExport({ text: 'Backup of everything on this device. Copy it somewhere safe (for example Notes).', data: JSON.stringify(S, null, 1), file: 'trading-backup-' + today() + '.json', mime: 'application/json' }); };
 $('mCsv').onclick = () => {
   const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const rows = [['child', 'date', 'type', 'symbol', 'quantity', 'price_or_amount_AED', 'fee_AED', 'note']];
-  S.txs.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => rows.push([(S.kids.find(k => k.id === t.kid) || {}).name, t.date, t.type, t.symbol, t.qty, t.price, t.fee, t.note]));
+  const rows = [['child', 'date', 'type', 'symbol', 'quantity', 'price_or_amount', 'currency', 'AED_per_unit', 'fee_AED', 'note']];
+  S.txs.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => rows.push([(S.kids.find(k => k.id === t.kid) || {}).name, t.date, t.type, t.symbol, t.qty, t.price, txCur(t), txFx(t), t.fee, t.note]));
   $('menu').close(); showExport({ text: 'All transactions as a table (CSV).', data: rows.map(r => r.map(q).join(',')).join('\n'), file: 'transactions-' + today() + '.csv', mime: 'text/csv' });
 };
 $('mImport').onclick = () => $('file').click();
@@ -572,7 +630,7 @@ $('file').onchange = async e => {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
     if (!(await ui.confirm('Replace ALL current data with this backup?', 'Replace'))) return;
-    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {}, dirty: {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
+    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {}, dirty: {}, fx: d.fx || {}, fxAt: d.fxAt || {}, v: 2 }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
   } catch (_) { ui.notice('Not a valid backup file.'); }
   e.target.value = '';
 };

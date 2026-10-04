@@ -23,4 +23,7 @@ A child is matched by name (case-insensitive), so use the same name on both phon
 Not live: mom sees what the kid last shared. Keep a backup (⋯ → *Backup*) — clearing browser data erases the app's data.
 
 ## Method
-Average-cost basis; buy fees are added to cost, sell fees reduce proceeds. P&L is in AED.
+Cash (what the kids give Mom) is always **AED**. A trade can be priced in another currency such as **USD**; it stores the USD price and the AED-per-USD rate used, so the AED paid is `shares × price × rate (+ fee)`.
+The rate is filled from the live market rate when a price key is set, otherwise from the last saved rate or the UAE dirham peg (3.6725 AED per USD, fixed since 1997). Edit it to the rate Mom's broker actually used.
+Holdings are valued at current USD price × current rate. All P&L is in AED, so it includes any exchange-rate movement.
+Average-cost basis (in AED); buy fees are added to cost, sell fees reduce proceeds. Fees are entered in AED.
