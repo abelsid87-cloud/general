@@ -57,7 +57,14 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
   <h1>Kids Trading Tracker <span class="lbl">· AED</span></h1>
   <div class="tabs" id="tabs"></div>
 </header>
-<main id="main"></main>
+<main id="main"><noscript><div class="card">This app needs JavaScript. If you are seeing this inside a preview pane, open the page in a normal browser (Safari / Chrome) instead.</div></noscript></main>
+<script>
+// Diagnostic: if anything in the app script fails, show the reason instead of a blank page.
+window.addEventListener('error', function (e) {
+  var m = document.getElementById('main');
+  if (m && !m.querySelector('.card')) m.innerHTML = '<div class="card"><b>Something went wrong starting the app.</b><div class="lbl" style="margin-top:6px;word-break:break-word">' + String(e.message || e.error || 'unknown error').replace(/</g, '&lt;') + '</div></div>';
+});
+</script>
 <button class="fab" id="add">+ Add</button>
 
 <dialog id="dlg">
@@ -497,8 +504,8 @@ $('file').onchange = async e => {
   e.target.value = '';
 };
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 render();
+try { if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
 </script>
 </body>
 </html>
