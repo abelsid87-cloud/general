@@ -102,6 +102,7 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
 'use strict';
 const KEY = 'kidsTrading.v1';
 const $ = id => document.getElementById(id);
+const TYPE_LABEL = { buy: 'Buy', sell: 'Sell', deposit: 'Add money', withdraw: 'Take out' };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
@@ -110,8 +111,8 @@ let curKid = S.kids[0] ? S.kids[0].id : null;
 let editId = null, curType = 'buy';
 
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; return s; } } catch (e) {}
-  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {} };
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; s.dirty = s.dirty || {}; return s; } } catch (e) {}
+  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {}, dirty: {} };
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { alert('Could not save: storage unavailable or full.'); } }
 
@@ -165,7 +166,9 @@ function render() {
 
   const main = $('main');
   $('add').style.display = curKid ? '' : 'none';
-  if (!curKid) { main.innerHTML = '<div class="empty">No children yet.<br><br><button class="btn pri" id="firstKid">Add first child</button></div>'; $('firstKid').onclick = addKid; return; }
+  if (!curKid) { main.innerHTML = '<div class="card" style="text-align:center;padding:24px 16px"><div style="font-size:40px">📈</div><h2 style="color:var(--text);text-transform:none;font-size:20px">Welcome!</h2><div class="lbl">Who is this for?</div><input id="firstName" placeholder="Your name" style="margin:12px 0;text-align:center" autocomplete="off"><button class="btn pri" id="firstKid" style="width:100%;padding:12px">Start</button><div class="lbl" style="margin-top:12px">Mom: add each child here, then use ⋯ to merge what they send you.</div></div>';
+    $('firstKid').onclick = () => { const n = $('firstName').value.trim(); if (!n) { $('firstName').focus(); return; } const k = { id: uid(), name: n }; S.kids.push(k); curKid = k.id; save(); render(); };
+    return; }
   const c = compute(curKid);
   const tot = c.total;
   let h = `<div class="grid">
@@ -176,6 +179,7 @@ function render() {
     <div class="card"><div class="lbl">Realized P&amp;L</div><div class="val sm ${cls(c.realized)}">${signed(c.realized)}</div></div>
     <div class="card"><div class="lbl">Unrealized P&amp;L</div><div class="val sm ${cls(c.unreal)}">${signed(c.unreal)}</div></div>
   </div>`;
+  h += `<button class="btn pri" id="sendMom" style="width:100%;margin-top:12px;padding:12px">📤 Send to Mom${S.dirty[curKid] ? ' · changes not sent yet' : ''}</button>`;
   if (c.unpriced) h += `<div class="lbl" style="margin-top:8px">⚠ Some holdings have no current price — valued at cost until you enter one.</div>`;
   if (c.issues.size) h += `<div class="lbl down" style="margin-top:8px">⚠ ${c.issues.size} transaction(s) flagged (oversell or negative cash) — check the highlighted rows.</div>`;
 
@@ -194,11 +198,15 @@ function render() {
     const amt = t.type === 'deposit' || t.type === 'withdraw' ? t.price : t.qty * t.price;
     const detail = t.type === 'deposit' || t.type === 'withdraw' ? '' : `${esc(t.symbol)} · ${+t.qty} @ ${aed(t.price)}${t.fee ? ' · fee ' + aed(t.fee) : ''}`;
     h += `<div class="row" data-id="${t.id}" style="cursor:pointer;${c.issues.has(t.id) ? 'background:#f871711a' : ''}">
-      <div><span class="tag">${t.type}</span>${detail}<div class="lbl">${t.date}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
+      <div><span class="tag">${TYPE_LABEL[t.type] || t.type}</span>${detail}<div class="lbl">${t.date}${t.note ? ' · ' + esc(t.note) : ''}</div></div>
       <div class="r">${aed(amt)}</div></div>`;
   });
-  main.innerHTML = h + '</div>';
+  h += '</div><div style="text-align:center;margin-top:20px"><button class="btn" id="mergeLink">📥 Got trades from a child? Merge</button></div>';
+  if (needsInstallTip()) h = installTip() + h;
+  main.innerHTML = h;
   const rb = $('refresh'); if (rb) rb.onclick = refreshPrices;
+  $('sendMom').onclick = shareCurrent; $('mergeLink').onclick = () => $('mMerge').onclick();
+  const tip = $('tipX'); if (tip) tip.onclick = () => { try { localStorage.setItem('kidsTrading.tip', '1'); } catch (e) {} render(); };
   main.querySelectorAll('.px').forEach(i => i.onchange = () => {
     const v = parseFloat(i.value);
     if (i.value === '') delete S.prices[i.dataset.sym]; else if (v >= 0) S.prices[i.dataset.sym] = v;
@@ -210,12 +218,12 @@ function render() {
 
 function setType(t) {
   curType = t;
-  const names = { deposit: 'Deposit', withdraw: 'Withdraw', buy: 'Buy', sell: 'Sell' };
+  const names = TYPE_LABEL;
   $('typeSeg').innerHTML = '';
   Object.keys(names).forEach(k => { const b = document.createElement('button'); b.type = 'button'; b.textContent = names[k]; b.className = k === t ? 'on' : ''; b.onclick = () => setType(k); $('typeSeg').appendChild(b); });
   const cash = t === 'deposit' || t === 'withdraw';
   $('symWrap').style.display = $('qtyWrap').style.display = $('feeWrap').style.display = cash ? 'none' : '';
-  $('pxLbl').textContent = cash ? 'Amount (AED)' : 'Price per unit (AED)';
+  $('pxLbl').textContent = cash ? (t === 'deposit' ? 'How much money did you give Mom? (AED)' : 'How much did you take out? (AED)') : 'Price per share (AED)';
 }
 function openForm(id) {
   editId = id || null; $('err').textContent = '';
@@ -230,7 +238,7 @@ function openForm(id) {
 }
 $('add').onclick = () => openForm();
 $('cancel').onclick = () => {
-  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); S.tomb[editId] = Date.now(); save(); render(); }
+  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); S.tomb[editId] = Date.now(); S.dirty[curKid] = true; save(); render(); }
   $('dlg').close();
 };
 $('form').onsubmit = e => {
@@ -253,7 +261,7 @@ $('form').onsubmit = e => {
     if (c.issues.has(tx.id)) { S.txs = prev; return bad(curType === 'sell' ? 'Cannot sell more than held at that date.' : 'Not enough cash at that date — add a deposit first.'); }
     S.txs = prev; return;
   }
-  save(); $('dlg').close(); render();
+  S.dirty[curKid] = true; save(); $('dlg').close(); render();
 };
 
 // ---- Price data (Twelve Data). The user's own free API key lives in localStorage only, never in backups. ----
@@ -380,6 +388,17 @@ $('mKey').onclick = () => {
   $('menu').close();
 };
 
+function needsInstallTip() {
+  const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+  let seen = false; try { seen = !!localStorage.getItem('kidsTrading.tip'); } catch (e) {}
+  return !standalone && !seen && /iPhone|iPad|Android/i.test(navigator.userAgent);
+}
+function installTip() {
+  const ios = /iPhone|iPad/i.test(navigator.userAgent);
+  const how = ios ? 'Tap the <b>Share</b> button, then <b>Add to Home Screen</b>.' : 'Tap the <b>⋮</b> menu, then <b>Install app</b> / <b>Add to Home screen</b>.';
+  return `<div class="card" style="margin-bottom:12px;display:flex;gap:10px;align-items:flex-start"><div style="flex:1">📲 <b>Keep it on your phone:</b> ${how}</div><button class="btn" id="tipX" style="padding:2px 10px">✕</button></div>`;
+}
+
 // ---- Share / merge (no server). Entries have unique ids + an updated-time; newest wins; deletes travel as tombstones. ----
 const normName = n => String(n || '').trim().toLowerCase();
 function buildShare(kidId) {
@@ -422,10 +441,10 @@ async function shareCurrent() {
   const name = 'trades-' + data.kid.name.replace(/[^\w-]+/g, '_') + '-' + today() + '.json';
   try {
     const f = new File([text], name, { type: 'application/json' });
-    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'My trades' }); return; }
-    if (navigator.share) { await navigator.share({ text, title: 'My trades' }); return; }
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'My trades' }); S.dirty[curKid] = false; save(); render(); return; }
+    if (navigator.share) { await navigator.share({ text, title: 'My trades' }); S.dirty[curKid] = false; save(); render(); return; }
   } catch (e) { if (e && e.name === 'AbortError') return; }
-  download(name, text, 'application/json');
+  download(name, text, 'application/json'); S.dirty[curKid] = false; save(); render();
   try { await navigator.clipboard.writeText(text); alert('Saved a file and copied the data. Send either one to mom.'); } catch (e) { alert('Saved a file. Send it to mom.'); }
 }
 $('mShare').onclick = () => { $('menu').close(); shareCurrent(); };
@@ -473,7 +492,7 @@ $('file').onchange = async e => {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
     if (!confirm('Replace ALL current data with this backup?')) return;
-    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
+    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {}, dirty: {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
   } catch (_) { alert('Not a valid backup file.'); }
   e.target.value = '';
 };
