@@ -176,7 +176,7 @@ function compute(kidId) {
   const txs = S.txs.filter(t => t.kid === kidId)
     .map((t, i) => ({ t, i })).sort((a, b) => a.t.date.localeCompare(b.t.date) || a.i - b.i).map(x => x.t);
   let cash = 0, deposited = 0, withdrawn = 0, realized = 0, fees = 0;
-  const pos = {}; const issues = [];
+  const pos = {}; const issues = [], why = {};
   for (const t of txs) {
     const fee = t.fee || 0;
     if (t.type === 'deposit') { cash += t.price; deposited += t.price; }
@@ -186,13 +186,13 @@ function compute(kidId) {
       p.qty += t.qty; p.cost += t.qty * t.price + fee; cash -= t.qty * t.price + fee; fees += fee;
     } else if (t.type === 'sell') {
       const p = pos[t.symbol] || (pos[t.symbol] = { qty: 0, cost: 0 });
-      if (t.qty > p.qty + 1e-9) { issues.push(t.id); continue; }
+      if (t.qty > p.qty + 1e-9) { issues.push(t.id); why[t.id] = 'oversell'; continue; }
       const avg = p.cost / p.qty, costOut = avg * t.qty;
       realized += t.qty * t.price - fee - costOut; fees += fee;
       cash += t.qty * t.price - fee; p.qty -= t.qty; p.cost -= costOut;
       if (p.qty < 1e-9) { p.qty = 0; p.cost = 0; }
     }
-    if (cash < -0.005) issues.push(t.id);
+    if (cash < -0.005) { issues.push(t.id); why[t.id] = why[t.id] || 'cash'; }
   }
   const holdings = Object.entries(pos).filter(([, p]) => p.qty > 0).map(([sym, p]) => {
     const last = S.prices[sym];
@@ -203,7 +203,7 @@ function compute(kidId) {
   const unpriced = holdings.some(h => h.mv == null);
   const unreal = holdings.reduce((a, h) => a + (h.upl || 0), 0);
   const net = deposited - withdrawn, value = cash + mvTotal;
-  return { cash, deposited, withdrawn, net, realized, unreal, fees, holdings, value, total: value - net, unpriced, issues: new Set(issues) };
+  return { cash, deposited, withdrawn, net, realized, unreal, fees, holdings, value, total: value - net, unpriced, issues: new Set(issues), why };
 }
 
 function render() {
@@ -267,6 +267,19 @@ function render() {
   main.querySelectorAll('[data-id]').forEach(r => r.onclick = () => openForm(r.dataset.id));
 }
 
+// Cash available on a trade's date, ignoring that trade itself (used to explain a cash warning).
+function cashInfo(txs, tx) {
+  let avail = 0, later = 0;
+  for (const t of txs) {
+    if (t.kid !== tx.kid || t.id === tx.id) continue;
+    if (t.date > tx.date) { if (t.type === 'deposit') later++; continue; }
+    const fee = t.fee || 0;
+    if (t.type === 'deposit') avail += t.price; else if (t.type === 'withdraw') avail -= t.price;
+    else if (t.type === 'buy') avail -= t.qty * t.price + fee; else if (t.type === 'sell') avail += t.qty * t.price - fee;
+  }
+  const need = tx.type === 'withdraw' ? tx.price : tx.qty * tx.price + (tx.fee || 0);
+  return { avail, need, later };
+}
 function loadExample() {
   const k = { id: uid(), name: 'Example' }; S.kids.push(k); curKid = k.id;
   const add = (type, date, symbol, qty, price, fee) => S.txs.push(Object.assign({ id: uid(), upd: Date.now(), kid: k.id, type, date, price, note: 'example' }, symbol ? { symbol, qty, fee: fee || 0 } : {}));
@@ -318,10 +331,15 @@ $('form').onsubmit = async e => {
   const prev = S.txs.slice();
   if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
   const c = compute(curKid);
-  if (c.issues.has(tx.id) || c.issues.size && !(await ui.confirm('This leaves some transactions invalid (selling more than held, or cash below zero). Save anyway?', 'Save anyway'))) {
-    if (c.issues.has(tx.id)) { S.txs = prev; return bad(curType === 'sell' ? 'Cannot sell more than held at that date.' : 'Not enough cash at that date — add a deposit first.'); }
-    S.txs = prev; return;
+  if (c.why[tx.id] === 'oversell') { S.txs = prev; return bad('Cannot sell more than you hold on that date.'); }
+  let ok = true;
+  if (c.why[tx.id] === 'cash') {
+    const i = cashInfo(prev, tx);
+    ok = await ui.confirm(`Not enough cash on ${tx.date}: ${aed(i.avail)} available, this needs ${aed(i.need)}.` + (i.later ? `\n\n${i.later} "Add money" entr${i.later > 1 ? 'ies are' : 'y is'} dated after ${tx.date} and not counted. Check the date.` : '\n\nHave you added the money you gave Mom?') + '\n\nSave anyway?', 'Save anyway');
+  } else if (c.issues.size) {
+    ok = await ui.confirm('This leaves some other transactions invalid (selling more than held, or cash below zero). Save anyway?', 'Save anyway');
   }
+  if (!ok) { S.txs = prev; return; }
   S.dirty[curKid] = true; save(); $('dlg').close(); render();
 };
 
