@@ -79,6 +79,8 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
     <button class="btn" id="mAddKid">Add child</button>
     <button class="btn" id="mRenKid">Rename current child</button>
     <button class="btn del" id="mDelKid">Delete current child &amp; all their data</button>
+    <button class="btn" id="mShare">Share this child's trades (send to mom)</button>
+    <button class="btn" id="mMerge">Merge trades from a child</button>
     <button class="btn" id="mKey">Price data API key</button>
     <button class="btn" id="mCsv">Export transactions (CSV)</button>
     <button class="btn" id="mExport">Backup (JSON)</button>
@@ -86,6 +88,14 @@ input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--li
     <button class="btn" id="mClose">Close</button>
   </div>
   <input type="file" id="file" accept="application/json" hidden>
+</dialog>
+
+<dialog id="mdlg">
+  <b>Merge trades</b>
+  <label>Choose the file the child sent</label><input type="file" id="mFile" accept=".json,application/json,text/plain">
+  <label>…or paste the text they sent</label><textarea id="mText" rows="5" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:12px monospace"></textarea>
+  <div class="err" id="mErr" style="color:var(--text)"></div>
+  <div class="acts"><button class="btn" id="mdClose">Close</button><button class="btn pri" id="mdGo">Merge</button></div>
 </dialog>
 
 <script>
@@ -100,8 +110,8 @@ let curKid = S.kids[0] ? S.kids[0].id : null;
 let editId = null, curType = 'buy';
 
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; return s; } } catch (e) {}
-  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {} };
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.kids) { s.meta = s.meta || {}; s.priceAt = s.priceAt || {}; s.tomb = s.tomb || {}; return s; } } catch (e) {}
+  return { kids: [], txs: [], prices: {}, meta: {}, priceAt: {}, tomb: {} };
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { alert('Could not save: storage unavailable or full.'); } }
 
@@ -220,7 +230,7 @@ function openForm(id) {
 }
 $('add').onclick = () => openForm();
 $('cancel').onclick = () => {
-  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); save(); render(); }
+  if (editId && confirm('Delete this transaction?')) { S.txs = S.txs.filter(x => x.id !== editId); S.tomb[editId] = Date.now(); save(); render(); }
   $('dlg').close();
 };
 $('form').onsubmit = e => {
@@ -234,7 +244,7 @@ $('form').onsubmit = e => {
   if (!cash && !sym) return bad('Enter a symbol.');
   if (!cash && !(qty > 0)) return bad('Enter a quantity above 0.');
   if (fee < 0) return bad('Fee cannot be negative.');
-  const tx = { id: editId || uid(), kid: curKid, type: curType, date: $('fDate').value, price, note: $('fNote').value.trim() };
+  const tx = { id: editId || uid(), upd: Date.now(), kid: curKid, type: curType, date: $('fDate').value, price, note: $('fNote').value.trim() };
   if (!cash) { tx.symbol = sym; tx.qty = qty; tx.fee = fee; if (pick && pick.symbol === sym) S.meta[sym] = { mic: pick.mic, cur: pick.cur, name: pick.name }; }
   const prev = S.txs.slice();
   if (editId) S.txs = S.txs.map(x => x.id === editId ? tx : x); else S.txs.push(tx);
@@ -370,6 +380,67 @@ $('mKey').onclick = () => {
   $('menu').close();
 };
 
+// ---- Share / merge (no server). Entries have unique ids + an updated-time; newest wins; deletes travel as tombstones. ----
+const normName = n => String(n || '').trim().toLowerCase();
+function buildShare(kidId) {
+  const kid = S.kids.find(k => k.id === kidId);
+  const txs = S.txs.filter(t => t.kid === kidId);
+  const ids = new Set(txs.map(t => t.id));
+  const tomb = {}; Object.keys(S.tomb).forEach(k => { tomb[k] = S.tomb[k]; });   // tombstones are id-only, safe to send all
+  const syms = new Set(txs.map(t => t.symbol).filter(Boolean)); const meta = {};
+  syms.forEach(sy => { if (S.meta[sy]) meta[sy] = S.meta[sy]; });
+  return { app: 'kids-trading-tracker', v: 1, from: kid.name, at: new Date().toISOString(), kid: { id: kid.id, name: kid.name }, txs, tomb, meta };
+}
+function mergeShare(d) {
+  if (!d || d.app !== 'kids-trading-tracker' || !d.kid || !Array.isArray(d.txs)) throw new Error('This is not a trades file from this app.');
+  let kid = S.kids.find(k => k.id === d.kid.id) || S.kids.find(k => normName(k.name) === normName(d.kid.name));
+  let created = false;
+  if (!kid) { kid = { id: d.kid.id, name: d.kid.name }; S.kids.push(kid); created = true; }
+  const r = { kid: kid.name, created, added: 0, updated: 0, removed: 0, same: 0 };
+  const tomb = d.tomb && typeof d.tomb === 'object' ? d.tomb : {};
+  for (const [id, ts] of Object.entries(tomb)) {                       // deletes first
+    const have = S.txs.find(t => t.id === id);
+    if (have && (have.upd || 0) <= ts) { S.txs = S.txs.filter(t => t.id !== id); r.removed++; }
+    if ((S.tomb[id] || 0) < ts) S.tomb[id] = ts;
+  }
+  for (const t of d.txs) {
+    if (!t || !t.id || !t.type || !t.date || !(t.price > 0)) continue;   // skip malformed rows
+    if (S.tomb[t.id] && S.tomb[t.id] >= (t.upd || 0)) continue;          // deleted here more recently
+    const have = S.txs.find(x => x.id === t.id);
+    const row = Object.assign({}, t, { kid: kid.id });
+    if (!have) { S.txs.push(row); r.added++; }
+    else if ((t.upd || 0) > (have.upd || 0)) { S.txs = S.txs.map(x => x.id === t.id ? row : x); r.updated++; }
+    else r.same++;
+  }
+  Object.entries(d.meta || {}).forEach(([sy, m]) => { if (!S.meta[sy]) S.meta[sy] = m; });
+  curKid = kid.id; save(); render();
+  return r;
+}
+async function shareCurrent() {
+  if (!curKid) return;
+  const data = buildShare(curKid), text = JSON.stringify(data);
+  const name = 'trades-' + data.kid.name.replace(/[^\w-]+/g, '_') + '-' + today() + '.json';
+  try {
+    const f = new File([text], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: 'My trades' }); return; }
+    if (navigator.share) { await navigator.share({ text, title: 'My trades' }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  download(name, text, 'application/json');
+  try { await navigator.clipboard.writeText(text); alert('Saved a file and copied the data. Send either one to mom.'); } catch (e) { alert('Saved a file. Send it to mom.'); }
+}
+$('mShare').onclick = () => { $('menu').close(); shareCurrent(); };
+$('mMerge').onclick = () => { $('menu').close(); $('mText').value = ''; $('mErr').textContent = ''; $('mFile').value = ''; $('mdlg').showModal(); };
+$('mdClose').onclick = () => $('mdlg').close();
+$('mFile').onchange = async e => { const f = e.target.files[0]; if (f) $('mText').value = await f.text(); };
+$('mdGo').onclick = () => {
+  try {
+    const raw = $('mText').value.trim(); if (!raw) throw new Error('Choose a file or paste the text first.');
+    const r = mergeShare(JSON.parse(raw));
+    $('mErr').textContent = `${r.kid}${r.created ? ' (new child)' : ''}: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.same} already up to date.`;
+    $('mText').value = '';
+  } catch (e) { $('mErr').textContent = e instanceof SyntaxError ? 'That text is not valid — copy the whole message.' : e.message; }
+};
+
 function addKid() {
   const n = (prompt('Child name?') || '').trim(); if (!n) return;
   const k = { id: uid(), name: n }; S.kids.push(k); curKid = k.id; save(); render();
@@ -381,7 +452,7 @@ $('mRenKid').onclick = () => { if (!curKid) return; const n = (prompt('New name?
 $('mDelKid').onclick = () => {
   if (!curKid) return;
   if (confirm('Delete ' + curName() + ' and ALL their transactions? This cannot be undone. Make a backup first.')) {
-    S.txs = S.txs.filter(t => t.kid !== curKid); S.kids = S.kids.filter(k => k.id !== curKid); curKid = S.kids[0] ? S.kids[0].id : null; save();
+    S.txs.filter(t => t.kid === curKid).forEach(t => { S.tomb[t.id] = Date.now(); }); S.txs = S.txs.filter(t => t.kid !== curKid); S.kids = S.kids.filter(k => k.id !== curKid); curKid = S.kids[0] ? S.kids[0].id : null; save();
   }
   $('menu').close(); render();
 };
@@ -402,7 +473,7 @@ $('file').onchange = async e => {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.kids) || !Array.isArray(d.txs)) throw 0;
     if (!confirm('Replace ALL current data with this backup?')) return;
-    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
+    S = { kids: d.kids, txs: d.txs, prices: d.prices || {}, meta: d.meta || {}, priceAt: d.priceAt || {}, tomb: d.tomb || {} }; curKid = S.kids[0] ? S.kids[0].id : null; save(); $('menu').close(); render();
   } catch (_) { alert('Not a valid backup file.'); }
   e.target.value = '';
 };
